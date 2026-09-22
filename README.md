@@ -20,6 +20,8 @@ npx @openai/codex-security scan /path/to/directory
 
 For CI, set `OPENAI_API_KEY` instead of signing in.
 
+For GitHub Actions, see the [Action setup and input reference](github-action/README.md).
+
 ## Generate SECURITY.md
 
 Draft repository-wide or component-scoped `SECURITY.md` guidance for future scans:

@@ -1,0 +1,134 @@
+name: Codex Security
+description: Scan code with Codex Security, enforce findings policy, and produce JSON, coverage, and SARIF reports.
+branding:
+  icon: shield
+  color: black
+inputs:
+  repository:
+    description: Checkout root. Use paths to select folders within the checkout.
+    default: ${{ github.workspace }}
+  scope:
+    description: 'repository, diff, or working-tree. Select diff for PR changes only; repository scans the full checkout.'
+    default: repository
+  paths:
+    description: Newline-delimited literal repository-relative files or folders. Only for repository scope; no globs.
+  diff-base:
+    description: Diff base revision. Defaults to the PR merge base; required outside PRs when scope is diff.
+  diff-head:
+    description: Diff head revision. Defaults to the PR head or HEAD and must match the checkout.
+  working-tree-base:
+    description: Base for working-tree changes. Defaults to HEAD; requires working-tree scope.
+  mode:
+    description: 'standard or deep. Deep supports repository and path scans only.'
+    default: standard
+  model:
+    description: Model with access through your API key. Cost limits require CLI pricing support for the model.
+    default: gpt-5.6-sol
+  effort:
+    description: 'Reasoning effort: minimal, low, medium, high, xhigh, or max (subject to model support).'
+    default: xhigh
+  max-cost:
+    description: Positive estimated USD stop threshold per invocation. In-flight requests can exceed it; unset means no cost limit.
+  fail-on-severity:
+    description: 'none, low, medium, high, or critical. Scanner/coverage/report failures fail independently.'
+    default: none
+  knowledge-base:
+    description: Newline-delimited repository-relative .md/.txt/.pdf/.docx context files or directories. No symlinks.
+  scan-prompt-file:
+    description: Repository-relative file of additional scan instructions (maximum 1 MiB).
+  validation-prompt-file:
+    description: Repository-relative file replacing final validation. Standard mode only (maximum 1 MiB).
+  workers:
+    description: Maximum concurrent deep-scan discovery workers (positive integer; deep only).
+  subagents:
+    description: Subagents per deep discovery worker (nonnegative integer; deep only).
+  stop-after-no-new:
+    description: Stop after this many discovery runs find no new issues (positive integer; deep only).
+  max-discovery-runs:
+    description: Maximum discovery runs (positive integer; deep only).
+  max-time-hours:
+    description: Deep discovery duration, greater than 0 and at most 96 hours. Job timeout still applies.
+  codex-config:
+    description: 'Newline-delimited TOML settings. Allowed: analytics.enabled (boolean) and features.multi_agent_v2.max_concurrent_threads_per_session (positive integer).'
+  provider:
+    description: Only openai is supported in this release.
+    default: openai
+  auth:
+    description: Only api-key is supported. Pass the secret via OPENAI_API_KEY.
+    default: api-key
+  safety-identifier:
+    description: Stable hashed end-user identifier for model requests (1–64 characters).
+  verbose:
+    description: Stream bounded, credential-redacted CLI diagnostics to the job log. Set false for lifecycle and elapsed-time messages only.
+    default: 'true'
+  dry-run:
+    description: Validate local configuration without a scan or API key. Does not verify authentication or model access. Use a separate non-required job; cannot publish a named check.
+    default: 'false'
+  cli-version:
+    description: Reviewed CLI version with a shipped integrity lock. Only 0.1.26 is supported.
+    default: 0.1.26
+  publish-check:
+    description: Publish a separate named check in addition to the job check. Requires github-token and checks write permission.
+    default: 'false'
+  check-name:
+    description: Stable name of the optional named check (maximum 100 characters).
+    default: Codex Security findings
+  github-token:
+    description: GitHub token for optional named check reporting. Never passed to the CLI or installer.
+  summary:
+    description: Write a human-readable job summary.
+    default: 'true'
+  annotations:
+    description: Emit up to 50 source finding annotations; complete findings remain in reports.
+    default: 'true'
+  upload-artifacts:
+    description: Upload an allowlist of validated reports. Reports may contain source and vulnerability details.
+    default: 'false'
+  artifact-name:
+    description: Report artifact name; choose distinct names for matrix jobs and multiple invocations.
+    default: codex-security
+  retention-days:
+    description: Artifact retention, 1–90 days (subject to repository limits).
+    default: '7'
+outputs:
+  sarif-path:
+    description: Absolute validated SARIF file path, or empty when unavailable or withheld.
+  json-path:
+    description: Absolute canonical findings JSON path, or empty when unavailable or withheld.
+  coverage-path:
+    description: Absolute coverage JSON path, or empty when unavailable or withheld.
+  results-directory:
+    description: Runner-local reports directory; do not upload it recursively.
+  scan-status:
+    description: 'completed, incomplete, failed, or skipped. Skipped is reserved for empty diffs or dry-run.'
+  skip-reason:
+    description: empty-diff or dry-run when no scan ran; otherwise empty.
+  policy-status:
+    description: 'passed, failed, or not-evaluated. Incomplete scans never pass the policy.'
+  report-status:
+    description: 'ready, partial, or failed. Reporting failure fails the action.'
+  exit-code:
+    description: CLI exit code, or empty if the CLI was not started.
+  scanned-sha:
+    description: Verified checkout commit SHA. Working-tree contents are not represented by this SHA alone.
+  analysis-ref:
+    description: GitHub ref matching the scanned revision. Empty for working-tree scans.
+  sarif-upload-ready:
+    description: 'true only for complete, validated reports with a publishable immutable revision. Remains true after severity-policy failure.'
+  critical-count:
+    description: Available critical findings, or empty before results are available.
+  high-count:
+    description: Available high findings, or empty before results are available.
+  medium-count:
+    description: Available medium findings, or empty before results are available.
+  low-count:
+    description: Available low findings, or empty before results are available.
+  informational-count:
+    description: Available informational findings, or empty before results are available.
+  estimated-cost:
+    description: Estimated USD cost reported by the CLI. Empty means unavailable, not zero.
+runs:
+  using: node24
+  main: github-action/dist/index.cjs
+  post: github-action/dist/post.cjs
+  post-if: always()
