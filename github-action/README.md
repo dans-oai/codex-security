@@ -19,6 +19,8 @@ When using a fork, replace `openai` with the fork owner.
 name: Codex Security repository
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '23 7 * * 1' # Mondays at 07:23 UTC
 
 permissions:
   contents: read
@@ -40,7 +42,8 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.CODEX_SECURITY_API_KEY }}
 ```
 
-Run it from **Actions → Codex Security repository → Run workflow**.
+The workflow runs weekly on Mondays at 07:23 UTC. To run it manually, use
+**Actions → Codex Security repository → Run workflow**.
 Findings are report-only by default. Errors and incomplete scans fail the job.
 Set `fail-on-severity` to fail on findings at or above a selected severity.
 
