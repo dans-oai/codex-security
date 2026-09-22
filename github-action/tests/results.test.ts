@@ -12,7 +12,7 @@ async function fixture(t: { after(fn: () => Promise<void>): void }): Promise<Res
   const root = await realpath(await mkdtemp(join(tmpdir(), 'codex-results-test-')));
   t.after(() => rm(root, { recursive: true, force: true }));
   await cp(new URL('./fixtures/completed-scan/', import.meta.url), root, { recursive: true });
-  return { resultsDirectory: root, cliVersion: '0.1.26', exitCode: 0,
+  return { resultsDirectory: root, cliVersion: '0.1.29', exitCode: 0,
     expected: { scope: 'repository', mode: 'standard', paths: [], scannedSha: 'a'.repeat(40), publishable: true }, failOnSeverity: 'none' };
 }
 async function change(options: ResultOptions, file: string, update: (value: any) => void, reseal = true): Promise<void> {

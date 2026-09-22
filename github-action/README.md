@@ -4,7 +4,7 @@ Run the published Codex Security CLI against a repository or pull request,
 evaluate findings, and produce JSON, coverage, and SARIF reports.
 The root [action.yml](../action.yml) is the public Action entrypoint.
 
-This integration is a preview. It retains the existing CLI **0.1.26** runtime
+This integration is a preview. It pins the published CLI **0.1.29** runtime
 and supports **Linux x64**, **Node 24**, and **OpenAI API-key authentication**.
 It installs the published CLI, not the CLI source at the Action's commit.
 The CLI's other providers, including Bedrock, are not exposed by this Action;
@@ -177,7 +177,7 @@ Inputs are strings. Quote booleans and use newline-separated literal paths for l
 | `safety-identifier` | Unset | Stable hashed end-user identifier for model requests (1–64 characters). |
 | `verbose` | `true` | Stream bounded, credential-redacted CLI diagnostics to the job log. Set false for lifecycle and elapsed-time messages only. |
 | `dry-run` | `false` | Validate local configuration without a scan or API key. Does not verify authentication or model access. Use a separate non-required job; cannot publish a named check. |
-| `cli-version` | `0.1.26` | Reviewed CLI version with a shipped integrity lock. Only 0.1.26 is supported. |
+| `cli-version` | `0.1.29` | Reviewed CLI version with a shipped integrity lock. Only 0.1.29 is supported. |
 | `publish-check` | `false` | Publish a separate named check in addition to the job check. Requires github-token and checks write permission. |
 | `check-name` | `Codex Security findings` | Stable name of the optional named check (maximum 100 characters). |
 | `github-token` | Unset | GitHub token for optional named check reporting. Never passed to the CLI or installer. |
@@ -224,7 +224,8 @@ Action runtime. macOS, Windows, ARM, and persistent shared runners are unsupport
 This Action supports GitHub.com; GitHub Enterprise Server is not supported.
 
 The CLI is installed with `npm ci --ignore-scripts` from the committed runtime
-lock, with a `smol-toml` override. Installation receives no scan credentials.
+lock, including the CLI's `smol-toml` 1.8.0 dependency. Installation receives no
+scan credentials.
 Only the scan receives the model API key; the GitHub reporting token is not
 forwarded to it. Each invocation has its own home, state, and temporary runtime.
 Cleanup removes that runtime; reports remain available to downstream job steps.
@@ -281,7 +282,7 @@ saved as CI artifacts. Dependencies and CLI locks remain separate from the SDK.
 The `dependencies` CI job audits both locks. The pinned CLI has existing
 dependency advisories in `extract-zip` ([symlink extraction](https://github.com/advisories/GHSA-jmr9-qjv8-65gv)
 and [arbitrary writes](https://github.com/advisories/GHSA-7pqw-9j4j-h8q3)); this
-migration does not upgrade or waive them. Resolve
+CLI upgrade does not resolve or waive them. Resolve
 the audit findings before treating the integration as production-ready. Updating
 the CLI requires reviewing the runtime lock, adapter, and completed-scan fixtures
 together. The runtime pin is maintained explicitly rather than automatically
@@ -290,3 +291,11 @@ following npm releases.
 The Action can be tested from a fork branch before an upstream release. A passing
 dry-run does not prove live model execution, named-check publication, artifact
 upload, or SARIF ingestion; those require separate integration testing.
+
+## Follow-up tasks
+
+- [ ] Decide how to automate update PRs when a new CLI is published to npm,
+  including regenerating the runtime lock and validating compatibility before release.
+- [ ] Add a minimal GitHub Action quickstart to the repository root README,
+  alongside the SDK and CLI documentation, with a basic workflow and a link
+  to this detailed guide.

@@ -93,11 +93,11 @@ test('scan environment excludes all inherited credential/config channels', () =>
 });
 
 test('shipped runtime lock has integrity for all transitive platform artifacts', async () => {
-  const lock = JSON.parse(await readFile(new URL('../runtime/0.1.26/package-lock.json', import.meta.url), 'utf8'));
+  const lock = JSON.parse(await readFile(new URL('../runtime/0.1.29/package-lock.json', import.meta.url), 'utf8'));
   validateRuntimeLock(lock);
-  const manifest = JSON.parse(await readFile(new URL('../runtime/0.1.26/package.json', import.meta.url), 'utf8'));
-  assert.deepEqual(manifest.overrides, { 'smol-toml': '1.7.1' });
-  assert.equal(lock.packages['node_modules/smol-toml'].version, '1.7.1');
+  const manifest = JSON.parse(await readFile(new URL('../runtime/0.1.29/package.json', import.meta.url), 'utf8'));
+  assert.equal(manifest.dependencies['@openai/codex-security'], '0.1.29');
+  assert.equal(lock.packages['node_modules/smol-toml'].version, '1.8.0');
   const regressed = structuredClone(lock);
   regressed.packages['node_modules/smol-toml'].version = '1.6.1';
   assert.throws(() => validateRuntimeLock(regressed), /security fix/);

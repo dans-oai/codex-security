@@ -13,7 +13,7 @@ const bundle = await build({
 });
 const generated = new Map(bundle.outputFiles.map(file => [relative(root, file.path), Buffer.from(file.contents)]));
 const lock = JSON.parse(await readFile(resolve(root, 'package-lock.json'), 'utf8'));
-const cliLockBytes = await readFile(resolve(root, 'runtime/0.1.26/package-lock.json'));
+const cliLockBytes = await readFile(resolve(root, 'runtime/0.1.29/package-lock.json'));
 const cliLock = JSON.parse(cliLockBytes);
 function components(packages, namespace) {
   return Object.entries(packages).filter(([path, info]) => path && !info.dev).map(([path, info]) => ({
@@ -27,10 +27,10 @@ const sourceFiles = (await readdir(resolve(root, 'src'))).filter(name => name.en
 const sourceHash = createHash('sha256');
 for (const file of sourceFiles) sourceHash.update(file).update('\0').update(await readFile(resolve(root, 'src', file))).update('\0');
 const manifest = {
-  actionVersion: '0.1.0', status: 'unreleased', nodeRuntime: 'node24', platform: 'linux-x64', cliVersion: '0.1.26',
+  actionVersion: '0.1.0', status: 'unreleased', nodeRuntime: 'node24', platform: 'linux-x64', cliVersion: '0.1.29',
   sourceSha256: sourceHash.digest('hex'), actionLockSha256: hash(await readFile(resolve(root, 'package-lock.json'))),
   runtimeLockSha256: hash(cliLockBytes),
-  buildInputs: Object.fromEntries(await Promise.all(['../action.yml', 'package.json', 'runtime/0.1.26/package.json', 'scripts/build.mjs'].map(async path => [path, {sha256: hash(await readFile(resolve(root, path)))}]))),
+  buildInputs: Object.fromEntries(await Promise.all(['../action.yml', 'package.json', 'runtime/0.1.29/package.json', 'scripts/build.mjs'].map(async path => [path, {sha256: hash(await readFile(resolve(root, path)))}]))),
   files: Object.fromEntries([...generated].map(([path, bytes]) => [path, {sha256: hash(bytes), bytes: bytes.length}])),
 };
 const sbom = {

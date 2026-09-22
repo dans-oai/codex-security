@@ -3,8 +3,8 @@ import { access, chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, real
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { runProcess, safeLogLines } from './process.js';
 
-export const SUPPORTED_CLI_VERSION = '0.1.26';
-export const PATCHED_TOML_VERSION = '1.7.1';
+export const SUPPORTED_CLI_VERSION = '0.1.29';
+export const PATCHED_TOML_VERSION = '1.8.0';
 const MARKER = '.codex-security-action-owned';
 const ROOT_PREFIX = 'codex-security-runtime-';
 const REGISTRY = 'https://registry.npmjs.org/';

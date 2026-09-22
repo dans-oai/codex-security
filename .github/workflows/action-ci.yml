@@ -61,4 +61,4 @@ jobs:
         run: npm audit --audit-level=high
       - name: Check locked CLI dependencies
         if: always()
-        run: npm audit --prefix runtime/0.1.26 --omit=dev --audit-level=high
+        run: npm audit --prefix runtime/0.1.29 --omit=dev --audit-level=high

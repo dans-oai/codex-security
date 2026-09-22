@@ -65,8 +65,8 @@ inputs:
     description: Validate local configuration without a scan or API key. Does not verify authentication or model access. Use a separate non-required job; cannot publish a named check.
     default: 'false'
   cli-version:
-    description: Reviewed CLI version with a shipped integrity lock. Only 0.1.26 is supported.
-    default: 0.1.26
+    description: Reviewed CLI version with a shipped integrity lock. Only 0.1.29 is supported.
+    default: 0.1.29
   publish-check:
     description: Publish a separate named check in addition to the job check. Requires github-token and checks write permission.
     default: 'false'
