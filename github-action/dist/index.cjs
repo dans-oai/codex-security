@@ -99213,7 +99213,7 @@ function resultSummary(result, inputs, target, secrets = []) {
     `**Commit:** <code>${target.scannedSha}</code>`,
     `**Model:** <code>${esc(inputs.model)}</code> \xB7 **Reasoning effort:** ${inputs.effort}`,
     `**Failure threshold:** ${inputs.failOnSeverity === "none" ? "report-only findings" : inputs.failOnSeverity + " and above"}. Scanner, coverage, and reporting errors fail the action.`,
-    `**Estimated cost:** ${result.estimatedCost === void 0 ? "unavailable" : `$${result.estimatedCost.toFixed(4)}`}${inputs.maxCost !== void 0 ? ` \xB7 **Stop threshold:** $${inputs.maxCost} (estimated; in-flight requests can exceed it)` : ""}`,
+    ...inputs.maxCost !== void 0 ? [`**Stop threshold:** $${inputs.maxCost} (estimated; in-flight requests can exceed it)`] : [],
     "Applicable root and nested SECURITY.md policy is discovered by the scanner. PR policy edits are refused before scanning."
   ];
   if (result.scanStatus !== "completed") parts.push("**Findings below are provisional. This is not a completed scan.**");
