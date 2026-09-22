@@ -158,12 +158,24 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
 
 test('PR severity failure retains complete SARIF outputs for always upload steps', async (t) => {
   const app = await harness(t, 'pr'); app.setInput('fail-on-severity', 'high'); app.configure({ exitCode: 1 });
+  app.setInput('model', 'gpt-5.6-luna'); app.setInput('effort', 'medium');
+  app.setInput('annotations', ''); // Use the default, as in the README's PR workflow.
   const result = await app.run();
   assert.equal(result.exitCode, 1); assert.equal(result.setups, 1); assert.equal(result.cleanups, 1);
   assert.equal(result.outputs['scan-status'], 'completed'); assert.equal(result.outputs['policy-status'], 'failed');
   assert.equal(result.outputs['sarif-upload-ready'], 'true'); assert.equal(result.outputs['analysis-ref'], 'refs/pull/4/head');
   assert.equal(result.outputs['scanned-sha'], app.sha); assert.equal(result.outputs['high-count'], '1');
   assert.equal(result.outputs['estimated-cost'], '0.125'); assert.ok(result.outputs['sarif-path']);
+  assert.equal(result.args[result.args.indexOf('--model') + 1], 'gpt-5.6-luna');
+  assert.equal(result.args[result.args.indexOf('--effort') + 1], 'medium');
+  assert.ok(!result.args.includes('--max-cost'));
+  const annotation = /^::warning ([^\r\n]+)::([^\r\n]+)$/m.exec(result.logs);
+  assert.ok(annotation, 'PR findings must emit a GitHub warning annotation even when the severity policy fails');
+  const properties = Object.fromEntries(annotation[1].split(',').map(property => property.split('=')));
+  assert.equal(properties.file, 'src/extract.py');
+  assert.equal(properties.line, '41'); assert.equal(properties.endLine, '44');
+  assert.match(properties.title, /^HIGH%3A Unsafe archive extraction/);
+  assert.match(annotation[2], /filesystem write without containment validation/);
 });
 
 test('scheduled complete report-only scan succeeds', async (t) => {

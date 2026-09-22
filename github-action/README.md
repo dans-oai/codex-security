@@ -79,13 +79,15 @@ jobs:
         uses: openai/codex-security@REPLACE_WITH_REVIEWED_COMMIT
         with:
           scope: diff
-          max-cost: '5'
+          model: gpt-5.6-luna
+          effort: medium
           fail-on-severity: high
         env:
           OPENAI_API_KEY: ${{ secrets.CODEX_SECURITY_API_KEY }}
 ```
 
 This job fails on high or critical findings, incomplete scans, and errors.
+File and line annotations are enabled by default.
 Make it a required check in repository rules to block merging when it fails.
 
 Use PR scanning for trusted contributors with branches in the calling repository.
