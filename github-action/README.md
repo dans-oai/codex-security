@@ -28,16 +28,14 @@ permissions:
 jobs:
   security:
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Scan repository
-        id: security
-        uses: openai/codex-security@REPLACE_WITH_REVIEWED_COMMIT
+      - uses: openai/codex-security@REPLACE_WITH_REVIEWED_COMMIT
         with:
-          max-cost: '25'
+          model: gpt-5.6-sol
+          effort: high
         env:
           OPENAI_API_KEY: ${{ secrets.CODEX_SECURITY_API_KEY }}
 ```
@@ -46,9 +44,6 @@ The workflow runs weekly on Mondays at 07:23 UTC. To run it manually, use
 **Actions → Codex Security repository → Run workflow**.
 Findings are report-only by default. Errors and incomplete scans fail the job.
 Set `fail-on-severity` to fail on findings at or above a selected severity.
-
-Choose `max-cost` for your budget. It is an estimated USD stop threshold;
-in-flight requests can exceed it. Without this input, no cost limit is set.
 
 ## Scan pull requests
 
@@ -125,7 +120,8 @@ set `publish-check: 'true'`, pass `github-token: ${{ github.token }}`, and grant
 ### GitHub code scanning
 
 Grant the job `security-events: write` and, for private repositories,
-`actions: read`, alongside `contents: read`. Add this step after the scan:
+`actions: read`, alongside `contents: read`. Set `id: security` on the scan step,
+then add this step after it:
 
 ```yaml
 - name: Upload security findings
