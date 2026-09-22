@@ -1,30 +1,26 @@
 # Codex Security GitHub Action
 
-Run the published Codex Security CLI against a repository or pull request,
-evaluate findings, and produce JSON, coverage, and SARIF reports.
-The root [action.yml](../action.yml) is the public Action entrypoint.
+Run Codex Security scans in GitHub Actions. Scan a repository or pull request,
+check findings against a severity threshold, and export JSON, coverage, and
+SARIF reports.
 
-This integration is a preview. It pins the published CLI **0.1.29** runtime
-and supports **Linux x64**, **Node 24**, and **OpenAI API-key authentication**.
-It installs the published CLI, not the CLI source at the Action's commit.
-The CLI's other providers, including Bedrock, are not exposed by this Action;
-see the separate [Bedrock workflow example](../examples/github-actions/README.md).
+## Quick start
 
-## Scan a repository
+Use a GitHub-hosted Ubuntu 24.04 x64 runner on GitHub.com and an OpenAI API key
+with access to the selected model. For Amazon Bedrock, see the separate
+[workflow example](../examples/github-actions/README.md).
 
-Add a `CODEX_SECURITY_API_KEY` secret to the repository that will run the scan.
-Save this workflow under its `.github/workflows/` directory. Replace
-`REPLACE_WITH_REVIEWED_COMMIT` with a full commit SHA containing the Action.
-For fork development, replace `openai` with the fork owner and use your pushed
-branch name as the ref. No Marketplace publication or release tag is needed.
+Add your API key as a repository secret named `CODEX_SECURITY_API_KEY`, then
+save this workflow in `.github/workflows/codex-security.yml`.
+Replace `REPLACE_WITH_REVIEWED_COMMIT` with the full SHA of an Action commit.
+When using a fork, replace `openai` with the fork owner.
 
 ```yaml
 name: Codex Security repository
 on:
   workflow_dispatch:
-  # Enable a schedule after testing the workflow.
-  # schedule:
-  #   - cron: '23 7 * * 1'
+  schedule:
+    - cron: '23 7 * * 1' # Mondays at 07:23 UTC
 
 permissions:
   contents: read
@@ -32,37 +28,27 @@ permissions:
 jobs:
   security:
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Scan repository
-        id: security
-        uses: openai/codex-security@REPLACE_WITH_REVIEWED_COMMIT
+      - uses: openai/codex-security@REPLACE_WITH_REVIEWED_COMMIT
         with:
-          scope: repository
           model: gpt-5.6-sol
           effort: high
-          max-cost: '25'
-          fail-on-severity: none
         env:
           OPENAI_API_KEY: ${{ secrets.CODEX_SECURITY_API_KEY }}
 ```
 
-Run it from **Actions → Codex Security repository → Run workflow**.
-Findings are report-only in this example; errors and incomplete scans still fail.
-The budget is an example, not a price estimate. `max-cost` is an estimated USD
-stop threshold; in-flight requests can exceed it. Choose your budget explicitly.
-
-For a setup test without credentials or model calls, set `dry-run: 'true'` and
-omit the API-key environment entry. Use a separate, non-required job: dry-run
-validates configuration, not authentication, model access, or security coverage.
+The workflow runs weekly on Mondays at 07:23 UTC. To run it manually, use
+**Actions → Codex Security repository → Run workflow**.
+Findings are report-only by default. Errors and incomplete scans fail the job.
+Set `fail-on-severity` to fail on findings at or above a selected severity.
 
 ## Scan pull requests
 
-Use the same secret and replace the Action commit placeholder as above.
-Check out the PR **head**, with full history and no persisted Git credentials.
+Use the same API-key secret and Action commit as above. Check out the PR head
+with full history so the Action can resolve the diff.
 
 ```yaml
 name: Codex Security PR
@@ -93,39 +79,47 @@ jobs:
         uses: openai/codex-security@REPLACE_WITH_REVIEWED_COMMIT
         with:
           scope: diff
-          model: gpt-5.6-sol
-          effort: high
-          max-cost: '5'
+          model: gpt-5.6-luna
+          effort: medium
           fail-on-severity: high
         env:
           OPENAI_API_KEY: ${{ secrets.CODEX_SECURITY_API_KEY }}
 ```
 
-This fails on high or critical findings, incomplete scans, and errors.
-The job can be made a required PR check in repository rules. Fork PRs and
-Dependabot PRs are refused; this workflow is for trusted contributors with
-branches in the repository. Hosting the Action in a fork does not prevent it
-from scanning same-repository PRs in the calling repository.
+This job fails on high or critical findings, incomplete scans, and errors.
+File and line annotations are enabled by default.
 
-## Reports and scan settings
+Use PR scanning for trusted contributors with branches in the calling repository.
+Fork and Dependabot PRs, `pull_request_target`, and `workflow_run` are not supported.
+PRs that change `SECURITY.md` are also refused; review and merge policy changes
+separately before scanning dependent code changes.
 
-- Put the scan immediately after checkout, before build steps modify files.
-  Repository and diff scans require a clean checkout of the triggering repository
-  and revision. The Action runs against the caller's checkout, not its own source.
-- `paths` accepts newline-separated literal files/folders for repository scope.
-  It cannot be combined with diff or working-tree scope. Deep mode also requires
-  repository scope. Outside PR events, diff scans require `diff-base`.
-- `fail-on-severity: none` disables findings enforcement, not scanner health
-  checks. Incomplete coverage never passes as a completed assessment.
-- Enable `upload-artifacts: 'true'` for downloadable validated reports. Default
-  retention is seven days. Reports and diagnostics can include source and findings.
-- Optional named checks require `publish-check: 'true'`,
-  `github-token: ${{ github.token }}`, and `checks: write`. The normal job check
-  already exists without this option.
+## Scan settings
 
-To upload SARIF, grant the job `security-events: write` and, for private
-repositories, `actions: read`, alongside `contents: read`. Add this step after
-the scan:
+Keep unrelated credentials and deployment steps in separate jobs.
+
+- Set `paths` to newline-separated files or folders to scan part of a repository.
+- Set `mode: deep` for repeated discovery passes. Deep mode and `paths` require
+  repository scope.
+- For diff scans outside PR events, set `diff-base`.
+- Set `dry-run: 'true'` to check configuration without an API key or model calls.
+  Use a separate setup job; dry-run does not assess code or verify model access.
+
+## Reports
+
+The Action writes a job summary and source annotations. Set
+`upload-artifacts: 'true'` for downloadable reports, retained for seven days by
+default. Reports can contain source code and vulnerability details.
+
+The normal job check is available automatically. For an additional named check,
+set `publish-check: 'true'`, pass `github-token: ${{ github.token }}`, and grant
+`checks: write`.
+
+### GitHub code scanning
+
+Grant the job `security-events: write` and, for private repositories,
+`actions: read`, alongside `contents: read`. Set `id: security` on the scan step,
+then add this step after it:
 
 ```yaml
 - name: Upload security findings
@@ -138,11 +132,50 @@ the scan:
     category: codex-security-repository
 ```
 
-Complete scans remain uploadable after a severity-policy failure. Incomplete
-scans, dry runs, and working-tree snapshots are not uploadable. Use a distinct,
-stable category for each independent scope (for example, repository versus PR).
-Code scanning must be available in the destination repository; see
-[GitHub's upload requirements](https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/integrate-with-existing-tools/upload-sarif-file).
+Complete scans remain uploadable when findings exceed the severity threshold.
+Incomplete scans, dry runs, and working-tree snapshots are not uploadable.
+Use a distinct category for each scan scope, such as repository and PR scans.
+See [GitHub's SARIF upload requirements](https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/integrate-with-existing-tools/upload-sarif-file)
+for code scanning availability and permissions.
+
+## Runtime
+
+The Action installs a pinned CLI release from npm using a committed dependency
+lock. It runs on Linux x64 with Node 24 and Python 3.11 or 3.12; the Ubuntu 24.04
+runner supplies these prerequisites. Authentication uses `OPENAI_API_KEY`.
+Temporary runtime files are removed after the job; reports remain available to
+downstream steps.
+
+## Troubleshooting
+
+- **Checkout or history errors:** use the triggering revision, `fetch-depth: 0`
+  for PRs, and `persist-credentials: false`.
+- **Authentication errors:** check the repository secret and model access.
+- **Missing SARIF uploads:** inspect `scan-status`, `report-status`, and
+  `sarif-upload-ready`.
+- **Incomplete scans:** inspect the coverage report before adjusting scope or budget.
+
+CLI diagnostics stream by default. Set `verbose: 'false'` for lifecycle and
+elapsed-time messages only.
+
+## Development
+
+From the repository root:
+
+```bash
+npm --prefix github-action ci --ignore-scripts --no-audit --no-fund
+npm --prefix github-action run docs
+npm --prefix github-action run build
+npm --prefix github-action run validate
+# Linux x64 with Node 24; no model calls:
+node github-action/scripts/linux-smoke.mjs
+```
+
+Commit source changes and the generated `dist/*.cjs` bundles together.
+Validation checks types, tests, Action metadata, documentation, and bundle
+reproducibility. CI also runs the packaged Linux smoke test and audits the Action
+and CLI dependency locks. Update the CLI pin and lock together, and verify report
+compatibility when adopting a new release.
 
 <!-- action-reference:start -->
 
@@ -213,89 +246,3 @@ All outputs are strings. An empty cost or count means unavailable, not zero.
 | `estimated-cost` | Estimated USD cost reported by the CLI. Empty means unavailable, not zero. |
 
 <!-- action-reference:end -->
-
-## Runtime and trust boundaries
-
-Use a dedicated ephemeral Linux x64 runner with trusted code and contributors.
-Ubuntu 24.04 supplies supported system Python 3.12; Python 3.11 or a Python 3.12
-installation in GitHub's hosted tool cache is also supported. npm must be in a
-system location or GitHub's Node 24 tool cache. The runner supplies the Node 24
-Action runtime. macOS, Windows, ARM, and persistent shared runners are unsupported.
-This Action supports GitHub.com; GitHub Enterprise Server is not supported.
-
-The CLI is installed with `npm ci --ignore-scripts` from the committed runtime
-lock, including the CLI's `smol-toml` 1.8.0 dependency. Installation receives no
-scan credentials.
-Only the scan receives the model API key; the GitHub reporting token is not
-forwarded to it. Each invocation has its own home, state, and temporary runtime.
-Cleanup removes that runtime; reports remain available to downstream job steps.
-
-These controls are not operating-system isolation from other processes running
-as the same user. Keep unrelated credentials and deployment tasks in separate
-jobs. Fork PRs, Dependabot PRs, `pull_request_target`, and `workflow_run` are
-refused. Same-repository origin does not establish contributor trust.
-
-PRs changing any `SECURITY.md` file are refused, including policy-only PRs.
-Review and merge policy changes through your repository's authorized process,
-then update dependent code PRs. Symlinked PR policies are refused as well.
-Knowledge-base and custom prompt files affect analysis and require review.
-
-The Action preserves the pinned CLI's approval and sandbox defaults, including
-automatic approval review. `codex-config` permits only the keys listed above;
-it cannot override permissions, executables, plugins, or authentication.
-Analytics default to disabled. Other CLI versions require an updated runtime
-lock and result-adapter validation.
-
-## Troubleshooting
-
-Logs show preparation, scan timing, target revision, and final scan/policy/report
-status. CLI diagnostics stream by default; `verbose: 'false'` keeps lifecycle
-messages while suppressing scan/export diagnostics. A 30-second elapsed-time
-message indicates that the process is running, not that coverage is complete.
-
-For PR-history errors, use the head SHA and `fetch-depth: 0`. For credential
-errors, check the caller's secret and `persist-credentials: false`. For skipped
-SARIF uploads, inspect `scan-status`, `report-status`, and `sarif-upload-ready`.
-For incomplete scans, inspect coverage before adjusting the scope or budget.
-
-## Development
-
-From this repository's root:
-
-```bash
-npm --prefix github-action ci --ignore-scripts --no-audit --no-fund
-npm --prefix github-action run docs
-npm --prefix github-action run build
-npm --prefix github-action run validate
-# On Linux x64 with Node 24 and the prerequisites above; no model calls:
-node github-action/scripts/linux-smoke.mjs
-```
-
-Commit source changes and both `dist/*.cjs` bundles together. Validation checks
-types, unit tests, metadata, generated documentation, and bundle reproducibility.
-The Linux smoke test resolves the entrypoint from the root `action.yml` and runs
-the bundled Action with the locked CLI against a synthetic checkout, including
-its post-cleanup entrypoint.
-Release metadata and the SBOM are generated into ignored `build/` files and
-saved as CI artifacts. Dependencies and CLI locks remain separate from the SDK.
-
-The `dependencies` CI job audits both locks. The pinned CLI has existing
-dependency advisories in `extract-zip` ([symlink extraction](https://github.com/advisories/GHSA-jmr9-qjv8-65gv)
-and [arbitrary writes](https://github.com/advisories/GHSA-7pqw-9j4j-h8q3)); this
-CLI upgrade does not resolve or waive them. Resolve
-the audit findings before treating the integration as production-ready. Updating
-the CLI requires reviewing the runtime lock, adapter, and completed-scan fixtures
-together. The runtime pin is maintained explicitly rather than automatically
-following npm releases.
-
-The Action can be tested from a fork branch before an upstream release. A passing
-dry-run does not prove live model execution, named-check publication, artifact
-upload, or SARIF ingestion; those require separate integration testing.
-
-## Follow-up tasks
-
-- [ ] Decide how to automate update PRs when a new CLI is published to npm,
-  including regenerating the runtime lock and validating compatibility before release.
-- [ ] Add a minimal GitHub Action quickstart to the repository root README,
-  alongside the SDK and CLI documentation, with a basic workflow and a link
-  to this detailed guide.
