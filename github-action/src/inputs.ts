@@ -1,4 +1,4 @@
-export const CLI_VERSION = '0.1.29';
+export const CLI_VERSION = '0.1.30';
 export const INPUT_NAMES = [
   'repository', 'scope', 'paths', 'diff-base', 'diff-head', 'working-tree-base',
   'mode', 'model', 'effort', 'max-cost', 'fail-on-severity', 'knowledge-base',

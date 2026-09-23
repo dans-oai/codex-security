@@ -55330,7 +55330,7 @@ var import_promises8 = require("node:fs/promises");
 var import_node_path6 = require("node:path");
 
 // src/inputs.ts
-var CLI_VERSION = "0.1.29";
+var CLI_VERSION = "0.1.30";
 var INPUT_NAMES = [
   "repository",
   "scope",
@@ -55787,7 +55787,7 @@ async function resolveTarget(inputs, event) {
 var import_node_fs = require("node:fs");
 var import_promises2 = require("node:fs/promises");
 var import_node_path3 = require("node:path");
-var SUPPORTED_CLI_VERSION = "0.1.29";
+var SUPPORTED_CLI_VERSION = "0.1.30";
 var PATCHED_TOML_VERSION = "1.8.0";
 var MARKER = ".codex-security-action-owned";
 var ROOT_PREFIX = "codex-security-runtime-";
@@ -56201,7 +56201,7 @@ async function analyzeResults(options) {
     canonicalValid: false,
     scanId: ""
   };
-  if (options.cliVersion !== "0.1.29") {
+  if (options.cliVersion !== "0.1.30") {
     result.errors.push("No result adapter for this CLI version.");
     return result;
   }

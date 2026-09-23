@@ -210,7 +210,7 @@ Inputs are strings. Quote booleans and use newline-separated literal paths for l
 | `safety-identifier` | Unset | Stable hashed end-user identifier for model requests (1–64 characters). |
 | `verbose` | `true` | Stream bounded, credential-redacted CLI diagnostics to the job log. Set false for lifecycle and elapsed-time messages only. |
 | `dry-run` | `false` | Validate local configuration without a scan or API key. Does not verify authentication or model access. Use a separate non-required job; cannot publish a named check. |
-| `cli-version` | `0.1.29` | Reviewed CLI version with a shipped integrity lock. Only 0.1.29 is supported. |
+| `cli-version` | `0.1.30` | Reviewed CLI version with a shipped integrity lock. Only 0.1.30 is supported. |
 | `publish-check` | `false` | Publish a separate named check in addition to the job check. Requires github-token and checks write permission. |
 | `check-name` | `Codex Security findings` | Stable name of the optional named check (maximum 100 characters). |
 | `github-token` | Unset | GitHub token for optional named check reporting. Never passed to the CLI or installer. |

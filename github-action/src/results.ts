@@ -171,7 +171,7 @@ export async function analyzeResults(options: ResultOptions): Promise<ScanResult
     counts: { critical: 0, high: 0, medium: 0, low: 0, informational: 0 },
     paths: { resultsDirectory: '', manifestPath: '', jsonPath: '', coveragePath: '', sarifPath: '' }, errors: [],
     sarifUploadReady: false, canonicalValid: false, scanId: '' };
-  if (options.cliVersion !== '0.1.29') { result.errors.push('No result adapter for this CLI version.'); return result; }
+  if (options.cliVersion !== '0.1.30') { result.errors.push('No result adapter for this CLI version.'); return result; }
   if (typeof options.estimatedCost === 'number' && Number.isFinite(options.estimatedCost) && options.estimatedCost >= 0) result.estimatedCost = options.estimatedCost;
   const bytes = new Map<string, Buffer>();
   const values = new Map<string, unknown>();

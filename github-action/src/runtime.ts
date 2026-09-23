@@ -3,7 +3,7 @@ import { access, chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, real
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { runProcess, safeLogLines } from './process.js';
 
-export const SUPPORTED_CLI_VERSION = '0.1.29';
+export const SUPPORTED_CLI_VERSION = '0.1.30';
 export const PATCHED_TOML_VERSION = '1.8.0';
 const MARKER = '.codex-security-action-owned';
 const ROOT_PREFIX = 'codex-security-runtime-';
