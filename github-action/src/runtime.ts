@@ -2,8 +2,9 @@ import { constants } from 'node:fs';
 import { access, chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { runProcess, safeLogLines } from './process.js';
+import runtimeManifest from '../runtime/package.json' with { type: 'json' };
 
-export const SUPPORTED_CLI_VERSION = '0.1.30';
+export const SUPPORTED_CLI_VERSION = runtimeManifest.dependencies['@openai/codex-security'];
 export const PATCHED_TOML_VERSION = '1.8.0';
 const MARKER = '.codex-security-action-owned';
 const ROOT_PREFIX = 'codex-security-runtime-';
@@ -12,7 +13,6 @@ const REGISTRY = 'https://registry.npmjs.org/';
 export interface RuntimeOptions {
   actionRoot: string;
   tempRoot: string;
-  version: string;
   log?: (line: string) => void;
 }
 export interface Runtime {
@@ -140,7 +140,6 @@ export async function trustedNpm(fs: {
 }
 
 export async function setupRuntime(options: RuntimeOptions): Promise<Runtime> {
-  if (options.version !== SUPPORTED_CLI_VERSION) throw new Error(`Runtime version must be ${SUPPORTED_CLI_VERSION}; other versions have no reviewed runtime lock.`);
   if (process.platform !== 'linux' || process.arch !== 'x64') throw new Error('Codex Security Action currently supports Linux x64 runners only.');
   if (Number(process.versions.node.split('.')[0]) !== 24) throw new Error('Codex Security Action requires the Node 24 GitHub Actions runtime.');
   if (!isAbsolute(options.actionRoot) || !isAbsolute(options.tempRoot)) throw new Error('Action and temporary roots must be absolute.');
@@ -162,7 +161,7 @@ export async function setupRuntime(options: RuntimeOptions): Promise<Runtime> {
     const env = runtimeEnvironment(paths);
     const pythonCheck = await runProcess(pythonPath, ['-I', '-c', 'import sys, sqlite3, tomllib; assert sys.version_info >= (3, 11)'], { cwd: root, env, timeoutMs: 10_000 });
     if (pythonCheck.exitCode !== 0 || pythonCheck.timedOut || pythonCheck.interrupted) throw new Error('Trusted Python 3.11 or later with sqlite3 and tomllib is required.');
-    const source = join(actionRoot, 'runtime', SUPPORTED_CLI_VERSION);
+    const source = join(actionRoot, 'runtime');
     const lockPath = await regularFile(join(source, 'package-lock.json'));
     const packagePath = await regularFile(join(source, 'package.json'));
     if (!lockPath.startsWith(source + sep) || !packagePath.startsWith(source + sep)) throw new Error('Runtime manifests must remain within the action package.');

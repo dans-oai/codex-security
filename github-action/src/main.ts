@@ -103,7 +103,7 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
       core.info(`Preparing Codex Security ${SUPPORTED_CLI_VERSION}. Scope: ${inputs.scope}; mode: ${inputs.mode}; effort: ${inputs.effort}.`);
       const preparationStarted = performance.now();
       let timer = heartbeat('CLI preparation', preparationStarted);
-      try { runtime = await deps.setupRuntime({actionRoot, tempRoot, version: SUPPORTED_CLI_VERSION, log: core.info}); }
+      try { runtime = await deps.setupRuntime({actionRoot, tempRoot, log: core.info}); }
       finally { clearInterval(timer); }
       core.info(`CLI preparation completed in ${elapsed(preparationStarted)}.`);
       core.saveState('runtime-root', runtime.root);
@@ -145,7 +145,7 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
         let checkoutError = '';
         try { await resolveTarget(inputs, event); }
         catch { checkoutError = 'The source checkout or policy changed during scanning. Results cannot establish a completed scan of the requested revision.'; }
-        const resultOptions = {resultsDirectory: runtime.resultsDirectory, cliVersion: SUPPORTED_CLI_VERSION,
+        const resultOptions = {resultsDirectory: runtime.resultsDirectory,
           exitCode: interrupted || checkoutError ? 2 : execution.exitCode,
           expected: {scope: inputs.scope, mode: inputs.mode, paths: inputs.paths, scannedSha: target.scannedSha,
             diffBase: target.diffBase ?? target.workingTreeBase, diffHead: target.diffHead, publishable: target.publishable && !interrupted && !checkoutError},

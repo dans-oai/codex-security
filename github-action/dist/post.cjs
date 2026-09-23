@@ -19406,6 +19406,18 @@ function getState(name) {
 // src/runtime.ts
 var import_promises = require("node:fs/promises");
 var import_node_path = require("node:path");
+
+// runtime/package.json
+var package_default = {
+  name: "codex-security-action-runtime",
+  private: true,
+  dependencies: {
+    "@openai/codex-security": "0.1.30"
+  }
+};
+
+// src/runtime.ts
+var SUPPORTED_CLI_VERSION = package_default.dependencies["@openai/codex-security"];
 var MARKER = ".codex-security-action-owned";
 var ROOT_PREFIX = "codex-security-runtime-";
 async function cleanupRuntime(root2, tempRoot2) {

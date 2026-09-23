@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { mkdtemp, mkdir, writeFile, readFile, symlink, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { cleanupRuntime, runtimeEnvironment, setupRuntime, trustedNpm, trustedPython, validateRuntimeLock } from '../src/runtime.js';
+import { cleanupRuntime, runtimeEnvironment, trustedNpm, trustedPython, validateRuntimeLock } from '../src/runtime.js';
 
 function pythonFilesystem(files: Record<string, string>, entries: string[] = []) {
   return {
@@ -93,10 +93,16 @@ test('scan environment excludes all inherited credential/config channels', () =>
 });
 
 test('shipped runtime lock has integrity for all transitive platform artifacts', async () => {
-  const lock = JSON.parse(await readFile(new URL('../runtime/0.1.30/package-lock.json', import.meta.url), 'utf8'));
+  const lock = JSON.parse(await readFile(new URL('../runtime/package-lock.json', import.meta.url), 'utf8'));
   validateRuntimeLock(lock);
-  const manifest = JSON.parse(await readFile(new URL('../runtime/0.1.30/package.json', import.meta.url), 'utf8'));
-  assert.equal(manifest.dependencies['@openai/codex-security'], '0.1.30');
+  const manifest = JSON.parse(await readFile(new URL('../runtime/package.json', import.meta.url), 'utf8'));
+  assert.equal(manifest.dependencies['@openai/codex-security'], lock.packages['node_modules/@openai/codex-security'].version);
+  for (const path of ['', 'node_modules/@openai/codex-security']) {
+    const mismatched = structuredClone(lock);
+    if (path) mismatched.packages[path].version = '0.0.0';
+    else mismatched.packages[path].dependencies['@openai/codex-security'] = '0.0.0';
+    assert.throws(() => validateRuntimeLock(mismatched), /version/);
+  }
   assert.equal(lock.packages['node_modules/smol-toml'].version, '1.8.0');
   const regressed = structuredClone(lock);
   regressed.packages['node_modules/smol-toml'].version = '1.6.1';
@@ -131,8 +137,4 @@ test('cleanup preserves reports and rejects arbitrary or symlink roots', async (
     assert.ok((await stat(join(reports, 'report.sarif'))).isFile());
     await cleanupRuntime(owned, base);
   } finally { await rm(base, { recursive: true, force: true }); }
-});
-
-test('unreviewed versions fail before platform detection or installation', async () => {
-  await assert.rejects(setupRuntime({ actionRoot: '/none', tempRoot: '/none', version: 'latest' }), /reviewed/);
 });

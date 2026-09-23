@@ -1,6 +1,5 @@
 {
   "name": "codex-security-action-runtime",
-  "version": "0.1.30",
   "private": true,
   "dependencies": {
     "@openai/codex-security": "0.1.30"

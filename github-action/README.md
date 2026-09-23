@@ -175,8 +175,10 @@ node github-action/scripts/linux-smoke.mjs
 Commit source changes and the generated `dist/*.cjs` bundles together.
 Validation checks types, tests, Action metadata, documentation, and bundle
 reproducibility. CI also runs the packaged Linux smoke test and audits the Action
-and CLI dependency locks. Update the CLI pin and lock together, and verify report
-compatibility when adopting a new release.
+and CLI dependency locks. The `@openai/codex-security` dependency in
+`runtime/package.json` is the CLI version source. To upgrade, update that exact
+pin and regenerate `runtime/package-lock.json`, rebuild the bundles, and run
+validation. Verify report compatibility when adopting a new release.
 
 <!-- action-reference:start -->
 

@@ -55767,7 +55767,18 @@ async function resolveTarget(inputs, event) {
 var import_node_fs = require("node:fs");
 var import_promises2 = require("node:fs/promises");
 var import_node_path3 = require("node:path");
-var SUPPORTED_CLI_VERSION = "0.1.30";
+
+// runtime/package.json
+var package_default = {
+  name: "codex-security-action-runtime",
+  private: true,
+  dependencies: {
+    "@openai/codex-security": "0.1.30"
+  }
+};
+
+// src/runtime.ts
+var SUPPORTED_CLI_VERSION = package_default.dependencies["@openai/codex-security"];
 var PATCHED_TOML_VERSION = "1.8.0";
 var MARKER = ".codex-security-action-owned";
 var ROOT_PREFIX = "codex-security-runtime-";
@@ -55886,7 +55897,6 @@ async function trustedNpm(fs8 = { regularFile: (path4) => regularFile(path4, fal
   throw new Error("A trusted npm installation is required. Use an Ubuntu GitHub-hosted runner with Node 24 in /opt/hostedtoolcache/node (actions/setup-node can prepare it); npm from the checkout or PATH is not accepted.");
 }
 async function setupRuntime(options) {
-  if (options.version !== SUPPORTED_CLI_VERSION) throw new Error(`Runtime version must be ${SUPPORTED_CLI_VERSION}; other versions have no reviewed runtime lock.`);
   if (process.platform !== "linux" || process.arch !== "x64") throw new Error("Codex Security Action currently supports Linux x64 runners only.");
   if (Number(process.versions.node.split(".")[0]) !== 24) throw new Error("Codex Security Action requires the Node 24 GitHub Actions runtime.");
   if (!(0, import_node_path3.isAbsolute)(options.actionRoot) || !(0, import_node_path3.isAbsolute)(options.tempRoot)) throw new Error("Action and temporary roots must be absolute.");
@@ -55908,7 +55918,7 @@ async function setupRuntime(options) {
     const env = runtimeEnvironment(paths);
     const pythonCheck = await runProcess(pythonPath, ["-I", "-c", "import sys, sqlite3, tomllib; assert sys.version_info >= (3, 11)"], { cwd: root, env, timeoutMs: 1e4 });
     if (pythonCheck.exitCode !== 0 || pythonCheck.timedOut || pythonCheck.interrupted) throw new Error("Trusted Python 3.11 or later with sqlite3 and tomllib is required.");
-    const source = (0, import_node_path3.join)(actionRoot, "runtime", SUPPORTED_CLI_VERSION);
+    const source = (0, import_node_path3.join)(actionRoot, "runtime");
     const lockPath = await regularFile((0, import_node_path3.join)(source, "package-lock.json"));
     const packagePath = await regularFile((0, import_node_path3.join)(source, "package.json"));
     if (!lockPath.startsWith(source + import_node_path3.sep) || !packagePath.startsWith(source + import_node_path3.sep)) throw new Error("Runtime manifests must remain within the action package.");
@@ -56181,10 +56191,6 @@ async function analyzeResults(options) {
     canonicalValid: false,
     scanId: ""
   };
-  if (options.cliVersion !== "0.1.30") {
-    result.errors.push("No result adapter for this CLI version.");
-    return result;
-  }
   if (typeof options.estimatedCost === "number" && Number.isFinite(options.estimatedCost) && options.estimatedCost >= 0) result.estimatedCost = options.estimatedCost;
   const bytes = /* @__PURE__ */ new Map();
   const values = /* @__PURE__ */ new Map();
@@ -99347,7 +99353,7 @@ async function runAction(actionRoot, overrides = {}) {
       const preparationStarted = performance.now();
       let timer = heartbeat("CLI preparation", preparationStarted);
       try {
-        runtime = await deps.setupRuntime({ actionRoot, tempRoot, version: SUPPORTED_CLI_VERSION, log: info });
+        runtime = await deps.setupRuntime({ actionRoot, tempRoot, log: info });
       } finally {
         clearInterval(timer);
       }
@@ -99401,7 +99407,6 @@ async function runAction(actionRoot, overrides = {}) {
         }
         const resultOptions = {
           resultsDirectory: runtime.resultsDirectory,
-          cliVersion: SUPPORTED_CLI_VERSION,
           exitCode: interrupted || checkoutError ? 2 : execution.exitCode,
           expected: {
             scope: inputs.scope,
