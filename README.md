@@ -20,8 +20,6 @@ npx @openai/codex-security scan /path/to/directory
 
 For CI, set `OPENAI_API_KEY` instead of signing in.
 
-For GitHub Actions, see the [Action setup and input reference](github-action/README.md).
-
 ## Generate SECURITY.md
 
 Draft repository-wide or component-scoped `SECURITY.md` guidance for future scans:
@@ -58,6 +56,42 @@ await security.run("/path/to/directory", {
 console.log(result.reportPath);
 await security.close();
 ```
+
+## GitHub Actions
+
+Scan your repository on a schedule basis or on demand. Add an OpenAI API key as the repository
+secret `CODEX_SECURITY_API_KEY`, then save this workflow in
+`.github/workflows/codex-security.yml`. Replace `REPLACE_WITH_REVIEWED_COMMIT`
+with the full SHA of an Action commit.
+
+```yaml
+name: Codex Security
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 7 * * 1' # Mondays at 07:23 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  security:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: openai/codex-security@REPLACE_WITH_REVIEWED_COMMIT
+        with:
+          model: gpt-5.6-sol
+          effort: high
+        env:
+          OPENAI_API_KEY: ${{ secrets.CODEX_SECURITY_API_KEY }}
+```
+
+Findings are report-only by default; errors and incomplete scans fail the job.
+See the [Action setup and input reference](github-action/README.md) for PR scans,
+severity thresholds, and report uploads.
 
 ## Containerized bulk scans
 
