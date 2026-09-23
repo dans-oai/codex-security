@@ -59,7 +59,7 @@ await security.close();
 
 ## GitHub Actions
 
-Scan your repository on a schedule basis or on demand. Add an OpenAI API key as the repository
+Scan your repository on a scheduled basis, in PR, or on demand. Add an OpenAI API key as the repository
 secret `CODEX_SECURITY_API_KEY`, then save this workflow in
 `.github/workflows/codex-security.yml`. Replace `REPLACE_WITH_REVIEWED_COMMIT`
 with the full SHA of an Action commit.
