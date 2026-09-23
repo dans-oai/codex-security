@@ -88,7 +88,6 @@ jobs:
 
 This job fails on high or critical findings, incomplete scans, and errors.
 File and line annotations are enabled by default.
-Make it a required check in repository rules to block merging when it fails.
 
 Use PR scanning for trusted contributors with branches in the calling repository.
 Fork and Dependabot PRs, `pull_request_target`, and `workflow_run` are not supported.
@@ -97,10 +96,7 @@ separately before scanning dependent code changes.
 
 ## Scan settings
 
-Run the scan immediately after checkout, before builds or other steps modify
-files. Repository and diff scans require a clean checkout of the triggering
-repository and revision. Keep unrelated credentials and deployment steps in
-separate jobs.
+Keep unrelated credentials and deployment steps in separate jobs.
 
 - Set `paths` to newline-separated files or folders to scan part of a repository.
 - Set `mode: deep` for repeated discovery passes. Deep mode and `paths` require
