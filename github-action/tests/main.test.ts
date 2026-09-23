@@ -117,7 +117,10 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
       coverage.mode = 'working_tree';
       sarif.runs[0].properties.codexSecurityTargetKind = 'git_diff';
     }
-    if (incomplete) coverage.completeness = 'partial';
+    if (incomplete) {
+      coverage.completeness = 'partial';
+      coverage.deferred = [{id: 'unreviewed-route', reason: 'Dependency <example> unavailable; validation deferred.'}];
+    }
     sarif.runs[0].versionControlProvenance[0].revisionId = sha;
     await writeFile(coveragePath, JSON.stringify(coverage));
     manifest.scan.artifacts.find((entry: { path: string }) => entry.path === 'coverage.json').sha256 = createHash('sha256').update(JSON.stringify(coverage)).digest('hex');
@@ -277,13 +280,17 @@ test('configuration values in logs are redacted and cannot inject runner command
 });
 
 test('partial scan fails with provisional findings and no upload eligibility', async (t) => {
-  const app = await harness(t); app.configure({ exitCode: 2, partial: true }); const result = await app.run();
+  const app = await harness(t); app.configure({ exitCode: 2, partial: true }); app.setInput('verbose', 'false');
+  const result = await app.run();
   assert.equal(result.exitCode, 1); assert.equal(result.outputs['scan-status'], 'incomplete');
   assert.equal(result.outputs['policy-status'], 'not-evaluated'); assert.equal(result.outputs['sarif-upload-ready'], 'false');
   assert.equal(result.outputs['high-count'], '1'); assert.ok(result.outputs['json-path']);
   assert.match(result.logs, /Provisional findings:/);
   assert.match(result.logs, /::error::Scan could not complete\. Available findings are provisional\./);
   assert.match(result.summary, /\*\*Scan could not complete\. Available findings are provisional\.\*\*/);
+  assert.match(result.summary, /Deferred work: Dependency &lt;example&gt; unavailable; validation deferred\./);
+  assert.match(result.logs, /Report diagnostic: Deferred work: Dependency <example> unavailable; validation deferred\./);
+  assert.doesNotMatch(result.logs, /Synthetic live CLI progress/);
 });
 
 test('wrong checkout fails before setup or scanner execution', async (t) => {

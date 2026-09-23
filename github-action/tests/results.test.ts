@@ -52,11 +52,17 @@ test('exit 2 never passes even with complete artifacts', async (t) => {
 test('partial and unknown coverage remain provisional for exits 0, 1 and 2', async (t) => {
   const opts = await fixture(t);
   for (const completeness of ['partial', 'unknown']) {
-    await change(opts, 'coverage.json', (coverage) => { coverage.completeness = completeness; });
+    await change(opts, 'coverage.json', (coverage) => {
+      coverage.completeness = completeness;
+      coverage.deferred = [{ id: 'unreviewed-route', reason: 'Route validation could not finish.' }];
+      coverage.surfaces[0].disposition = 'needs_follow_up';
+    });
     for (const exit of [0, 1, 2]) {
       opts.exitCode = exit;
       const result = await analyzeResults(opts);
       assert.equal(result.scanStatus, 'incomplete'); assert.equal(result.policyStatus, 'not-evaluated'); assert.equal(result.sarifUploadReady, false);
+      assert.ok(result.errors.includes('Deferred work: Route validation could not finish.'));
+      assert.ok(result.errors.includes('Needs follow-up: Archive extraction'));
     }
   }
 });

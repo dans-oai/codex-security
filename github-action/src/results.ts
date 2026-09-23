@@ -128,7 +128,7 @@ function parseFindings(value: unknown): { scanId: string; findings: Finding[] } 
   return { scanId: doc.scanId, findings };
 }
 
-function validateCanonical(manifestValue: unknown, coverageValue: unknown, scanId: string, bytes: Map<string, Buffer>, expected: ExpectedScan): { status: string; completeness: string; targetKind: string } {
+function validateCanonical(manifestValue: unknown, coverageValue: unknown, scanId: string, bytes: Map<string, Buffer>, expected: ExpectedScan): { status: string; completeness: string; targetKind: string; incompleteReasons: string[] } {
   const manifest = document(manifestValue, 'scan-manifest');
   const coverage = document(coverageValue, 'coverage');
   const scan = manifest.scan;
@@ -162,7 +162,11 @@ function validateCanonical(manifestValue: unknown, coverageValue: unknown, scanI
     throw new Error('Reported diff revisions do not match the requested change set.');
   }
   if (target.kind !== 'git_revision' && (typeof target.snapshotDigest !== 'string' || !/^codex-security-snapshot\/v1:sha256:[a-f0-9]{64}$/u.test(target.snapshotDigest))) throw new Error('Missing or invalid snapshot identity.');
-  return { status: String(scan.status), completeness: String(coverage.completeness), targetKind: String(target.kind) };
+  const incompleteReasons = [
+    ...coverage.deferred.flatMap(item => isRecord(item) && typeof item.reason === 'string' ? [`Deferred work: ${item.reason}`] : []),
+    ...coverage.surfaces.flatMap(surface => isRecord(surface) && surface.disposition === 'needs_follow_up' ? [`Needs follow-up: ${surface.label}`] : []),
+  ];
+  return { status: String(scan.status), completeness: String(coverage.completeness), targetKind: String(target.kind), incompleteReasons };
 }
 
 export async function analyzeResults(options: ResultOptions): Promise<ScanResults> {
@@ -196,7 +200,10 @@ export async function analyzeResults(options: ResultOptions): Promise<ScanResult
     result.canonicalValid = true;
     result.paths.manifestPath = join(options.resultsDirectory, 'scan-manifest.json');
     result.paths.coveragePath = join(options.resultsDirectory, 'coverage.json');
-    if (canonical.completeness !== 'complete') result.scanStatus = 'incomplete';
+    if (canonical.completeness !== 'complete') {
+      result.scanStatus = 'incomplete';
+      result.errors.push(...canonical.incompleteReasons);
+    }
     else if (canonical.status === 'completed' && (options.exitCode === 0 || options.exitCode === 1)) result.scanStatus = 'completed';
     else result.errors.push('Scanner did not exit successfully with a completed scan.');
   } catch (error) { result.errors.push((error as Error).message); }

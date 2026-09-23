@@ -56176,7 +56176,11 @@ function validateCanonical(manifestValue, coverageValue, scanId, bytes, expected
     throw new Error("Reported diff revisions do not match the requested change set.");
   }
   if (target.kind !== "git_revision" && (typeof target.snapshotDigest !== "string" || !/^codex-security-snapshot\/v1:sha256:[a-f0-9]{64}$/u.test(target.snapshotDigest))) throw new Error("Missing or invalid snapshot identity.");
-  return { status: String(scan.status), completeness: String(coverage.completeness), targetKind: String(target.kind) };
+  const incompleteReasons = [
+    ...coverage.deferred.flatMap((item) => isRecord(item) && typeof item.reason === "string" ? [`Deferred work: ${item.reason}`] : []),
+    ...coverage.surfaces.flatMap((surface) => isRecord(surface) && surface.disposition === "needs_follow_up" ? [`Needs follow-up: ${surface.label}`] : [])
+  ];
+  return { status: String(scan.status), completeness: String(coverage.completeness), targetKind: String(target.kind), incompleteReasons };
 }
 async function analyzeResults(options) {
   const result = {
@@ -56220,8 +56224,10 @@ async function analyzeResults(options) {
     result.canonicalValid = true;
     result.paths.manifestPath = (0, import_node_path4.join)(options.resultsDirectory, "scan-manifest.json");
     result.paths.coveragePath = (0, import_node_path4.join)(options.resultsDirectory, "coverage.json");
-    if (canonical.completeness !== "complete") result.scanStatus = "incomplete";
-    else if (canonical.status === "completed" && (options.exitCode === 0 || options.exitCode === 1)) result.scanStatus = "completed";
+    if (canonical.completeness !== "complete") {
+      result.scanStatus = "incomplete";
+      result.errors.push(...canonical.incompleteReasons);
+    } else if (canonical.status === "completed" && (options.exitCode === 0 || options.exitCode === 1)) result.scanStatus = "completed";
     else result.errors.push("Scanner did not exit successfully with a completed scan.");
   } catch (error2) {
     result.errors.push(error2.message);
