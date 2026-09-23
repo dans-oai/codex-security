@@ -8,7 +8,7 @@ import { runProcess, safeLogLines } from './process.js';
 import { analyzeResults, type ScanResults } from './results.js';
 import { exportSarifArgs } from './sarif.js';
 import { collectReports, uploadReports } from './artifacts.js';
-import { resultSummary, emitAnnotations, plain, startCheck, type CheckPublisher } from './reporting.js';
+import { resultSummary, emitAnnotations, plain, resultTitle } from './reporting.js';
 
 export const OUTPUT_NAMES = [
   'sarif-path', 'json-path', 'coverage-path', 'results-directory', 'scan-status', 'skip-reason',
@@ -64,12 +64,11 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
   let inputs: Inputs | undefined;
   let target: Target | undefined;
   let runtime: Runtime | undefined;
-  let check: CheckPublisher | undefined;
   let tempRoot = '';
   let secrets: string[] = [];
   let success = false;
   let finalSummary = '';
-  let finalTitle = 'Codex Security failed before completion';
+  let finalTitle = 'Scan could not complete.';
   for (const name of OUTPUT_NAMES) core.setOutput(name, '');
   core.setOutput('scan-status', 'failed');
   core.setOutput('policy-status', 'not-evaluated');
@@ -77,7 +76,7 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
   core.setOutput('sarif-upload-ready', 'false');
   try {
     const apiKey = process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY || '';
-    secrets = [apiKey, core.getInput('github-token')].filter(Boolean);
+    secrets = [apiKey].filter(Boolean);
     for (const secret of secrets) core.setSecret(secret);
     const knownInputs = new Set(INPUT_NAMES.map(name => `INPUT_${name.toUpperCase()}`));
     for (const key of Object.keys(process.env)) {
@@ -86,12 +85,6 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
     inputs = parseInputs(name => core.getInput(name), process.env.GITHUB_WORKSPACE ?? '');
     const event = await context();
     validateEvent(event);
-    // Publish an explicitly requested in-progress check even if target validation
-    // subsequently refuses this PR. Invalid event identities never get a check.
-    const checkSha = event.eventName === 'pull_request' ? event.payload.pull_request.head.sha : event.sha;
-    if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(checkSha)) throw new Error('GitHub context has no valid commit SHA.');
-    try { check = await startCheck(inputs, event, checkSha); }
-    catch { throw new Error('Cannot create the requested check. Provide github-token with checks: write; no scan was started.'); }
     target = await resolveTarget(inputs, event);
     core.setOutput('scanned-sha', target.scannedSha);
     core.setOutput('analysis-ref', target.analysisRef);
@@ -189,36 +182,30 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
         finalSummary = resultSummary(result, inputs, target, secrets);
         if (inputs.annotations) emitAnnotations(result, secrets);
         success = result.scanStatus === 'completed' && result.policyStatus === 'passed' && result.reportStatus === 'ready';
-        finalTitle = result.scanStatus === 'completed'
-          ? `Scan complete; findings policy ${result.policyStatus}; report ${result.reportStatus}`
-          : 'Scan incomplete or failed; available findings are provisional';
+        finalTitle = resultTitle(result, inputs);
       }
     }
   } catch (error) {
     const message = plain(error instanceof Error ? error.message : 'Unexpected action failure.', secrets, 2000);
-    finalSummary = `Codex Security did not complete.\n\n<pre>${message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/@/g, '&#64;')}</pre>`;
+    finalSummary = `<pre>${message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/@/g, '&#64;')}</pre>`;
     core.setOutput('sarif-upload-ready', 'false');
     core.error(message);
   } finally {
-    let finalized = true;
     if (runtime) {
       try { await deps.cleanupRuntime(runtime.root, tempRoot); }
-      catch { finalized = false; core.error('Temporary runtime cleanup failed; inspect this dedicated runner before reuse.'); }
+      catch {
+        success = false;
+        finalTitle += ' Runtime cleanup failed.';
+        finalSummary += '\n\nTemporary runtime cleanup failed; inspect this dedicated runner before reuse.';
+        core.setOutput('report-status', 'failed');
+        core.setOutput('sarif-upload-ready', 'false');
+      }
     }
     if (inputs?.summary !== false) {
-      try { await core.summary.addRaw(finalSummary).write(); }
+      try { await core.summary.addRaw(`## Codex Security\n\n**${finalTitle}**\n\n${finalSummary}`).write(); }
       catch { core.warning('Could not write the job summary.'); }
     }
-    if (check) {
-      try { await check.complete(success && finalized, finalTitle, finalSummary); }
-      catch { finalized = false; core.error('Could not finalize the requested check; inspect checks: write permissions and GitHub availability.'); }
-    }
-    if (!finalized) {
-      core.setOutput('report-status', 'failed');
-      core.setOutput('sarif-upload-ready', 'false');
-    }
-    if (!success || !finalized) {
-      core.setFailed('Codex Security did not pass. See the job summary for findings, scanner health, and configuration errors.');
-    }
+    if (success) core.info(finalTitle);
+    else core.setFailed(`${finalTitle} See the job summary and logs for details.`);
   }
 }

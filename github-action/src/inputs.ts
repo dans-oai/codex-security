@@ -4,7 +4,7 @@ export const INPUT_NAMES = [
   'scan-prompt-file', 'validation-prompt-file', 'workers', 'subagents',
   'stop-after-no-new', 'max-discovery-runs', 'max-time-hours', 'codex-config',
   'safety-identifier', 'verbose', 'dry-run',
-  'publish-check', 'check-name', 'github-token', 'summary', 'annotations',
+  'summary', 'annotations',
   'upload-artifacts', 'artifact-name', 'retention-days',
 ] as const;
 
@@ -35,9 +35,6 @@ export interface Inputs {
   safetyIdentifier?: string;
   verbose: boolean;
   dryRun: boolean;
-  publishCheck: boolean;
-  checkName: string;
-  githubToken: string;
   summary: boolean;
   annotations: boolean;
   uploadArtifacts: boolean;
@@ -110,13 +107,7 @@ export function parseInputs(read: (name: string) => string, workspace: string): 
     if (key === 'analytics.enabled' ? !['true', 'false'].includes(value) : !/^\d+$/.test(value) || Number(value) < 1 || !Number.isSafeInteger(Number(value)))
       throw new Error(`Invalid value for codex-config key: ${key}.`);
   }
-  const publishCheck = bool('publish-check', false);
   const dryRun = bool('dry-run', false);
-  if (dryRun && publishCheck) throw new Error('dry-run cannot publish a production security check. Use a separate configuration-validation job.');
-  const githubToken = read('github-token').trim();
-  if (publishCheck && !githubToken) throw new Error('publish-check requires github-token and checks: write permission.');
-  const checkName = single('check-name', 'Codex Security findings');
-  if (checkName.length > 100) throw new Error('check-name must be at most 100 characters.');
   const artifactName = single('artifact-name', 'codex-security');
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(artifactName)) throw new Error('artifact-name must be 1–128 letters, numbers, dots, underscores, or hyphens.');
   const safetyIdentifier = single('safety-identifier') || undefined;
@@ -132,7 +123,7 @@ export function parseInputs(read: (name: string) => string, workspace: string): 
     scanPromptFile: single('scan-prompt-file') ? safeRelative('scan-prompt-file', single('scan-prompt-file')) : undefined,
     validationPromptFile: validationPromptFile ? safeRelative('validation-prompt-file', validationPromptFile) : undefined,
     ...deep, codexConfig, safetyIdentifier, verbose: bool('verbose', true), dryRun,
-    publishCheck, checkName, githubToken, summary: bool('summary', true), annotations: bool('annotations', true),
+    summary: bool('summary', true), annotations: bool('annotations', true),
     uploadArtifacts: bool('upload-artifacts', false), artifactName, retentionDays: num('retention-days', true, 1, 90) ?? 7,
   };
 }

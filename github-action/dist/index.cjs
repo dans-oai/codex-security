@@ -55354,9 +55354,6 @@ var INPUT_NAMES = [
   "safety-identifier",
   "verbose",
   "dry-run",
-  "publish-check",
-  "check-name",
-  "github-token",
   "summary",
   "annotations",
   "upload-artifacts",
@@ -55428,13 +55425,7 @@ function parseInputs(read, workspace) {
     if (key === "analytics.enabled" ? !["true", "false"].includes(value) : !/^\d+$/.test(value) || Number(value) < 1 || !Number.isSafeInteger(Number(value)))
       throw new Error(`Invalid value for codex-config key: ${key}.`);
   }
-  const publishCheck = bool("publish-check", false);
   const dryRun = bool("dry-run", false);
-  if (dryRun && publishCheck) throw new Error("dry-run cannot publish a production security check. Use a separate configuration-validation job.");
-  const githubToken = read("github-token").trim();
-  if (publishCheck && !githubToken) throw new Error("publish-check requires github-token and checks: write permission.");
-  const checkName = single("check-name", "Codex Security findings");
-  if (checkName.length > 100) throw new Error("check-name must be at most 100 characters.");
   const artifactName = single("artifact-name", "codex-security");
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(artifactName)) throw new Error("artifact-name must be 1\u2013128 letters, numbers, dots, underscores, or hyphens.");
   const safetyIdentifier = single("safety-identifier") || void 0;
@@ -55462,9 +55453,6 @@ function parseInputs(read, workspace) {
     safetyIdentifier,
     verbose: bool("verbose", true),
     dryRun,
-    publishCheck,
-    checkName,
-    githubToken,
     summary: bool("summary", true),
     annotations: bool("annotations", true),
     uploadArtifacts: bool("upload-artifacts", false),
@@ -99194,17 +99182,23 @@ function plain(value, secrets = [], limit = 6e3) {
 function html(value) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/@/g, "&#64;");
 }
+function resultTitle(result, inputs) {
+  if (result.scanStatus !== "completed") return "Scan could not complete. Available findings are provisional.";
+  if (result.reportStatus !== "ready") return "Scan completed, but required reporting failed.";
+  if (result.policyStatus === "failed") return "Scan completed. Findings meet the configured failure threshold.";
+  if (inputs.failOnSeverity === "none") return "Scan completed. Findings are reported without failing the job.";
+  return "Scan completed. No findings meet the failure threshold.";
+}
 function resultSummary(result, inputs, target, secrets = []) {
   const esc = (value, limit = 4e3) => html(plain(value, secrets, limit));
   const counts = Object.entries(result.counts).map(([level, count]) => `${level}: ${count}`).join(" \xB7 ");
   const parts = [
-    "## Codex Security",
     `**Scan:** ${result.scanStatus} \xB7 **Findings policy:** ${result.policyStatus} \xB7 **Report:** ${result.reportStatus}`,
     `**Findings:** ${counts}`,
     `**Scope:** ${inputs.scope}${inputs.paths.length ? ` <code>${esc(inputs.paths.join(", "))}</code>` : ""} \xB7 **Mode:** ${inputs.mode}`,
     `**Commit:** <code>${target.scannedSha}</code>`,
     `**Model:** <code>${esc(inputs.model)}</code> \xB7 **Reasoning effort:** ${inputs.effort}`,
-    `**Failure threshold:** ${inputs.failOnSeverity === "none" ? "report-only findings" : inputs.failOnSeverity + " and above"}. Scanner, coverage, and reporting errors fail the action.`,
+    `**Failure threshold:** ${inputs.failOnSeverity === "none" ? "report-only findings" : inputs.failOnSeverity + " and above"}. Scanner, coverage, and required reporting errors fail the action.`,
     ...inputs.maxCost !== void 0 ? [`**Stop threshold:** $${inputs.maxCost} (estimated; in-flight requests can exceed it)`] : [],
     "Applicable root and nested SECURITY.md policy is discovered by the scanner. PR policy edits are refused before scanning."
   ];
@@ -99233,23 +99227,6 @@ function emitAnnotations(result, secrets) {
     warning(message, props);
   }
   if (result.findings.length > 50) notice("Additional findings are available in the job summary and reports.");
-}
-async function startCheck(inputs, event, sha) {
-  if (!inputs.publishCheck) return void 0;
-  const [owner, repo] = event.repository.split("/");
-  const client2 = getOctokit(inputs.githubToken, { request: { timeout: 3e4 } });
-  const externalId = [process.env.GITHUB_RUN_ID, process.env.GITHUB_RUN_ATTEMPT, process.env.GITHUB_JOB, inputs.checkName].join(":").slice(0, 255);
-  const result = await client2.rest.checks.create({ owner, repo, head_sha: sha, name: inputs.checkName, status: "in_progress", external_id: externalId });
-  return { complete: async (success, title, summary2) => {
-    await client2.rest.checks.update({
-      owner,
-      repo,
-      check_run_id: result.data.id,
-      status: "completed",
-      conclusion: success ? "success" : "failure",
-      output: { title, summary: summary2 }
-    });
-  } };
 }
 
 // src/main.ts
@@ -99330,12 +99307,11 @@ async function runAction(actionRoot, overrides = {}) {
   let inputs;
   let target;
   let runtime;
-  let check;
   let tempRoot = "";
   let secrets = [];
   let success = false;
   let finalSummary = "";
-  let finalTitle = "Codex Security failed before completion";
+  let finalTitle = "Scan could not complete.";
   for (const name of OUTPUT_NAMES) setOutput(name, "");
   setOutput("scan-status", "failed");
   setOutput("policy-status", "not-evaluated");
@@ -99343,7 +99319,7 @@ async function runAction(actionRoot, overrides = {}) {
   setOutput("sarif-upload-ready", "false");
   try {
     const apiKey = process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY || "";
-    secrets = [apiKey, getInput("github-token")].filter(Boolean);
+    secrets = [apiKey].filter(Boolean);
     for (const secret of secrets) setSecret(secret);
     const knownInputs = new Set(INPUT_NAMES.map((name) => `INPUT_${name.toUpperCase()}`));
     for (const key of Object.keys(process.env)) {
@@ -99352,13 +99328,6 @@ async function runAction(actionRoot, overrides = {}) {
     inputs = parseInputs((name) => getInput(name), process.env.GITHUB_WORKSPACE ?? "");
     const event = await context5();
     validateEvent(event);
-    const checkSha = event.eventName === "pull_request" ? event.payload.pull_request.head.sha : event.sha;
-    if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(checkSha)) throw new Error("GitHub context has no valid commit SHA.");
-    try {
-      check = await startCheck(inputs, event, checkSha);
-    } catch {
-      throw new Error("Cannot create the requested check. Provide github-token with checks: write; no scan was started.");
-    }
     target = await resolveTarget(inputs, event);
     setOutput("scanned-sha", target.scannedSha);
     setOutput("analysis-ref", target.analysisRef);
@@ -99480,48 +99449,39 @@ async function runAction(actionRoot, overrides = {}) {
         finalSummary = resultSummary(result, inputs, target, secrets);
         if (inputs.annotations) emitAnnotations(result, secrets);
         success = result.scanStatus === "completed" && result.policyStatus === "passed" && result.reportStatus === "ready";
-        finalTitle = result.scanStatus === "completed" ? `Scan complete; findings policy ${result.policyStatus}; report ${result.reportStatus}` : "Scan incomplete or failed; available findings are provisional";
+        finalTitle = resultTitle(result, inputs);
       }
     }
   } catch (error2) {
     const message = plain(error2 instanceof Error ? error2.message : "Unexpected action failure.", secrets, 2e3);
-    finalSummary = `Codex Security did not complete.
-
-<pre>${message.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/@/g, "&#64;")}</pre>`;
+    finalSummary = `<pre>${message.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/@/g, "&#64;")}</pre>`;
     setOutput("sarif-upload-ready", "false");
     error(message);
   } finally {
-    let finalized = true;
     if (runtime) {
       try {
         await deps.cleanupRuntime(runtime.root, tempRoot);
       } catch {
-        finalized = false;
-        error("Temporary runtime cleanup failed; inspect this dedicated runner before reuse.");
+        success = false;
+        finalTitle += " Runtime cleanup failed.";
+        finalSummary += "\n\nTemporary runtime cleanup failed; inspect this dedicated runner before reuse.";
+        setOutput("report-status", "failed");
+        setOutput("sarif-upload-ready", "false");
       }
     }
     if (inputs?.summary !== false) {
       try {
-        await summary.addRaw(finalSummary).write();
+        await summary.addRaw(`## Codex Security
+
+**${finalTitle}**
+
+${finalSummary}`).write();
       } catch {
         warning("Could not write the job summary.");
       }
     }
-    if (check) {
-      try {
-        await check.complete(success && finalized, finalTitle, finalSummary);
-      } catch {
-        finalized = false;
-        error("Could not finalize the requested check; inspect checks: write permissions and GitHub availability.");
-      }
-    }
-    if (!finalized) {
-      setOutput("report-status", "failed");
-      setOutput("sarif-upload-ready", "false");
-    }
-    if (!success || !finalized) {
-      setFailed("Codex Security did not pass. See the job summary for findings, scanner health, and configuration errors.");
-    }
+    if (success) info(finalTitle);
+    else setFailed(`${finalTitle} See the job summary and logs for details.`);
   }
 }
 

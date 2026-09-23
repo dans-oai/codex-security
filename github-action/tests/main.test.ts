@@ -70,7 +70,7 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
     GITHUB_REF: scenario === 'schedule' ? 'refs/heads/main' : 'refs/pull/4/merge',
     GITHUB_ACTOR: 'trusted-maintainer', GITHUB_SERVER_URL: 'https://github.com',
     GITHUB_OUTPUT: outputPath, GITHUB_STATE: statePath, RUNNER_TEMP: root,
-    OPENAI_API_KEY: 'synthetic-offline-test-key', INPUT_SUMMARY: 'false', INPUT_ANNOTATIONS: 'false',
+    OPENAI_API_KEY: 'synthetic-offline-test-key', INPUT_SUMMARY: 'true', INPUT_ANNOTATIONS: 'false',
     INPUT_SCOPE: scenario === 'schedule' ? 'repository' : 'diff',
   });
   delete process.env.CODEX_API_KEY;
@@ -88,6 +88,14 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
   let omitSarif = false;
   let mutateCheckout = false;
   let exportSucceeds = true;
+  let cleanupFails = false;
+  let summary = '';
+  t.mock.method(core.summary, 'write', async () => {
+    summary = core.summary.stringify();
+    core.summary.emptyBuffer();
+    return core.summary;
+  });
+  t.after(() => { core.summary.emptyBuffer(); });
   let capturedArgs: readonly string[] = [];
   let capturedEnvironment: NodeJS.ProcessEnv = {};
   async function reports(): Promise<void> {
@@ -120,10 +128,11 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
   return {
     repository, sha, base, git, runtime,
     setInput: (name: string, value: string) => { process.env[inputKey(name)] = value; },
-    configure: (options: { exitCode?: number; partial?: boolean; missingSarif?: boolean; mutateCheckout?: boolean; exportSucceeds?: boolean }) => {
+    configure: (options: { exitCode?: number; partial?: boolean; missingSarif?: boolean; mutateCheckout?: boolean; exportSucceeds?: boolean; cleanupFails?: boolean }) => {
       executionExit = options.exitCode ?? executionExit; incomplete = options.partial ?? incomplete;
       omitSarif = options.missingSarif ?? omitSarif; mutateCheckout = options.mutateCheckout ?? mutateCheckout;
       exportSucceeds = options.exportSucceeds ?? exportSucceeds;
+      cleanupFails = options.cleanupFails ?? cleanupFails;
     },
     run: async () => {
       const logs: string[] = [];
@@ -139,7 +148,7 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
         process.exitCode = 0;
         await runAction(root, {
           setupRuntime: async () => { setups++; await reports(); return runtime; },
-          cleanupRuntime: async () => { cleanups++; },
+          cleanupRuntime: async () => { cleanups++; if (cleanupFails) throw new Error('Synthetic cleanup failure'); },
           runProcess: async (_executable, args, options): Promise<ProcessResult> => {
             processes++; capturedArgs = args; capturedEnvironment = options.env;
             options.log?.('[codex-security] Synthetic live CLI progress.');
@@ -151,7 +160,7 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
         });
         exitCode = process.exitCode;
       } finally { process.stdout.write = originalWrite; process.exitCode = previousExitCode; }
-      return { exitCode, setups, processes, cleanups, args: capturedArgs, environment: capturedEnvironment,
+      return { exitCode, setups, processes, cleanups, summary, args: capturedArgs, environment: capturedEnvironment,
         outputs: outputValues(await readFile(outputPath, 'utf8')), logs: logs.join('') };
     },
   };
@@ -170,6 +179,8 @@ test('PR severity failure retains complete SARIF outputs for always upload steps
   assert.equal(result.args[result.args.indexOf('--model') + 1], 'gpt-5.6-luna');
   assert.equal(result.args[result.args.indexOf('--effort') + 1], 'medium');
   assert.ok(!result.args.includes('--max-cost'));
+  assert.match(result.logs, /::error::Scan completed\. Findings meet the configured failure threshold\./);
+  assert.match(result.summary, /^## Codex Security\n\n\*\*Scan completed\. Findings meet the configured failure threshold\.\*\*/);
   const annotation = /^::warning ([^\r\n]+)::([^\r\n]+)$/m.exec(result.logs);
   assert.ok(annotation, 'PR findings must emit a GitHub warning annotation even when the severity policy fails');
   const properties = Object.fromEntries(annotation[1].split(',').map(property => property.split('=')));
@@ -191,6 +202,40 @@ test('scheduled complete report-only scan succeeds', async (t) => {
   assert.match(result.logs, /Security scan exited after \d+m \d+s; exit code: 0/);
   assert.match(result.logs, /Scan: completed; findings policy: passed; report: ready/);
   assert.match(result.logs, /Estimated cost: \$0.1250/);
+  assert.match(result.logs, /Scan completed\. Findings are reported without failing the job\./);
+  assert.match(result.summary, /\*\*Scan completed\. Findings are reported without failing the job\.\*\*/);
+});
+
+test('findings below the threshold pass with an explicit outcome', async (t) => {
+  const app = await harness(t); app.setInput('fail-on-severity', 'critical');
+  const result = await app.run();
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.outputs['high-count'], '1');
+  assert.match(result.logs, /Scan completed\. No findings meet the failure threshold\./);
+  assert.match(result.summary, /\*\*Scan completed\. No findings meet the failure threshold\.\*\*/);
+});
+
+test('missing API key reports an incomplete scan with the credential diagnostic', async (t) => {
+  const app = await harness(t); delete process.env.OPENAI_API_KEY;
+  const result = await app.run();
+  assert.equal(result.exitCode, 1); assert.equal(result.processes, 0);
+  assert.equal(result.outputs['policy-status'], 'not-evaluated');
+  assert.equal(result.outputs['sarif-upload-ready'], 'false');
+  assert.match(result.logs, /::error::Scan could not complete\./);
+  assert.match(result.summary, /\*\*Scan could not complete\.\*\*/);
+  assert.match(result.summary, /Set the CODEX_SECURITY_API_KEY repository secret/);
+  assert.doesNotMatch(result.logs, /Findings meet the configured failure threshold/);
+});
+
+test('cleanup failure fails the job and appears in the summary and final error', async (t) => {
+  const app = await harness(t); app.configure({cleanupFails: true});
+  const result = await app.run();
+  assert.equal(result.exitCode, 1); assert.equal(result.cleanups, 1);
+  assert.equal(result.outputs['scan-status'], 'completed');
+  assert.equal(result.outputs['report-status'], 'failed');
+  assert.equal(result.outputs['sarif-upload-ready'], 'false');
+  assert.match(result.logs, /::error::Scan completed\..*Runtime cleanup failed\./);
+  assert.match(result.summary, /Runtime cleanup failed\.\*\*/);
 });
 
 for (const threshold of ['none', 'high']) {
@@ -237,6 +282,8 @@ test('partial scan fails with provisional findings and no upload eligibility', a
   assert.equal(result.outputs['policy-status'], 'not-evaluated'); assert.equal(result.outputs['sarif-upload-ready'], 'false');
   assert.equal(result.outputs['high-count'], '1'); assert.ok(result.outputs['json-path']);
   assert.match(result.logs, /Provisional findings:/);
+  assert.match(result.logs, /::error::Scan could not complete\. Available findings are provisional\./);
+  assert.match(result.summary, /\*\*Scan could not complete\. Available findings are provisional\.\*\*/);
 });
 
 test('wrong checkout fails before setup or scanner execution', async (t) => {
@@ -281,6 +328,8 @@ test('failed strict export leaves a failed action with partial report', async (t
   const app = await harness(t); app.configure({ missingSarif: true, exportSucceeds: false }); const result = await app.run();
   assert.equal(result.exitCode, 1); assert.equal(result.outputs['scan-status'], 'completed'); assert.equal(result.outputs['report-status'], 'partial');
   assert.equal(result.outputs['sarif-upload-ready'], 'false');
+  assert.match(result.logs, /::error::Scan completed, but required reporting failed\./);
+  assert.match(result.summary, /\*\*Scan completed, but required reporting failed\.\*\*/);
 });
 
 test('working-tree results retain local reports without code-scanning upload', async (t) => {

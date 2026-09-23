@@ -56,16 +56,8 @@ inputs:
     description: Stream bounded, credential-redacted CLI diagnostics to the job log. Set false for lifecycle and elapsed-time messages only.
     default: 'true'
   dry-run:
-    description: Validate local configuration without a scan or API key. Does not verify authentication or model access. Use a separate non-required job; cannot publish a named check.
+    description: Validate local configuration without a scan or API key. Does not verify authentication or model access. Use a separate non-required job.
     default: 'false'
-  publish-check:
-    description: Publish a separate named check in addition to the job check. Requires github-token and checks write permission.
-    default: 'false'
-  check-name:
-    description: Stable name of the optional named check (maximum 100 characters).
-    default: Codex Security findings
-  github-token:
-    description: GitHub token for optional named check reporting. Never passed to the CLI or installer.
   summary:
     description: Write a human-readable job summary.
     default: 'true'

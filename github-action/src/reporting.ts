@@ -1,7 +1,6 @@
 import * as core from '@actions/core';
-import { getOctokit } from '@actions/github';
 import type { Inputs } from './inputs.js';
-import type { EventContext, Target } from './targets.js';
+import type { Target } from './targets.js';
 import type { ScanResults } from './results.js';
 
 export function plain(value: string, secrets: readonly string[] = [], limit = 6000): string {
@@ -14,17 +13,23 @@ export function plain(value: string, secrets: readonly string[] = [], limit = 60
 function html(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/@/g, '&#64;');
 }
+export function resultTitle(result: ScanResults, inputs: Inputs): string {
+  if (result.scanStatus !== 'completed') return 'Scan could not complete. Available findings are provisional.';
+  if (result.reportStatus !== 'ready') return 'Scan completed, but required reporting failed.';
+  if (result.policyStatus === 'failed') return 'Scan completed. Findings meet the configured failure threshold.';
+  if (inputs.failOnSeverity === 'none') return 'Scan completed. Findings are reported without failing the job.';
+  return 'Scan completed. No findings meet the failure threshold.';
+}
 export function resultSummary(result: ScanResults, inputs: Inputs, target: Target, secrets: readonly string[] = []): string {
   const esc = (value: string, limit = 4000) => html(plain(value, secrets, limit));
   const counts = Object.entries(result.counts).map(([level, count]) => `${level}: ${count}`).join(' · ');
   const parts = [
-    '## Codex Security',
     `**Scan:** ${result.scanStatus} · **Findings policy:** ${result.policyStatus} · **Report:** ${result.reportStatus}`,
     `**Findings:** ${counts}`,
     `**Scope:** ${inputs.scope}${inputs.paths.length ? ` <code>${esc(inputs.paths.join(', '))}</code>` : ''} · **Mode:** ${inputs.mode}`,
     `**Commit:** <code>${target.scannedSha}</code>`,
     `**Model:** <code>${esc(inputs.model)}</code> · **Reasoning effort:** ${inputs.effort}`,
-    `**Failure threshold:** ${inputs.failOnSeverity === 'none' ? 'report-only findings' : inputs.failOnSeverity + ' and above'}. Scanner, coverage, and reporting errors fail the action.`,
+    `**Failure threshold:** ${inputs.failOnSeverity === 'none' ? 'report-only findings' : inputs.failOnSeverity + ' and above'}. Scanner, coverage, and required reporting errors fail the action.`,
     ...(inputs.maxCost !== undefined ? [`**Stop threshold:** $${inputs.maxCost} (estimated; in-flight requests can exceed it)`] : []),
     'Applicable root and nested SECURITY.md policy is discovered by the scanner. PR policy edits are refused before scanning.',
   ];
@@ -47,17 +52,4 @@ export function emitAnnotations(result: ScanResults, secrets: readonly string[])
     core.warning(message, props);
   }
   if (result.findings.length > 50) core.notice('Additional findings are available in the job summary and reports.');
-}
-
-export interface CheckPublisher { complete: (success: boolean, title: string, summary: string) => Promise<void> }
-export async function startCheck(inputs: Inputs, event: EventContext, sha: string): Promise<CheckPublisher | undefined> {
-  if (!inputs.publishCheck) return undefined;
-  const [owner, repo] = event.repository.split('/');
-  const client = getOctokit(inputs.githubToken, {request: {timeout: 30_000}});
-  const externalId = [process.env.GITHUB_RUN_ID, process.env.GITHUB_RUN_ATTEMPT, process.env.GITHUB_JOB, inputs.checkName].join(':').slice(0, 255);
-  const result = await client.rest.checks.create({owner, repo, head_sha: sha, name: inputs.checkName, status: 'in_progress', external_id: externalId});
-  return { complete: async (success, title, summary) => {
-    await client.rest.checks.update({owner, repo, check_run_id: result.data.id, status: 'completed',
-      conclusion: success ? 'success' : 'failure', output: {title, summary}});
-  }};
 }

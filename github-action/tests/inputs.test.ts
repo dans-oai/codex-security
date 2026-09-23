@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { parseInputs, scanArguments } from '../src/inputs.js';
 const parse = (values: Record<string, string> = {}) => parseInputs(key => values[key] ?? '', '/checkout');
 
-test('defaults are stable across events and do not implicitly publish', () => {
+test('defaults are stable across events', () => {
   const input = parse();
   assert.equal(input.scope, 'repository'); assert.equal(input.mode, 'standard');
   assert.equal(input.effort, 'xhigh'); assert.equal(input.failOnSeverity, 'none');
-  assert.equal(input.publishCheck, false); assert.equal(input.uploadArtifacts, false);
+  assert.equal(input.uploadArtifacts, false);
   assert.equal(input.verbose, true);
 });
 test('verbose diagnostics default on and can be explicitly disabled', () => {
@@ -47,9 +47,7 @@ test('config cannot override credentials, executables, approval or supplied mode
   assert.throws(() => parse({'model':'--plugin-path=evil'}), /not a CLI option/);
   assert.throws(() => parse({'safety-identifier':'--patch'}), /hyphen/);
 });
-test('check publication requires credentials and cannot be a dry-run', () => {
-  assert.throws(() => parse({'publish-check':'true'}), /github-token/);
-  assert.throws(() => parse({'publish-check':'true','github-token':'test','dry-run':'true'}), /dry-run/);
+test('dry-run allows keyless configuration validation', () => {
   const dryArgs=scanArguments(parse({'dry-run':'true'}),{repository:'/checkout'},'/results','/usr/bin/python3');
   assert.equal(dryArgs[dryArgs.indexOf('--auth')+1],'auto'); assert.ok(dryArgs.includes('--dry-run'));
 });

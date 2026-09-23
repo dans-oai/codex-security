@@ -13,7 +13,6 @@ assert.equal(metadata.runs['post-if'], 'always()');
 const defaults = parseInputs(name => String(metadata.inputs[name]?.default ?? '').replace('${{ github.workspace }}', '/checkout'), '/checkout');
 assert.equal(defaults.failOnSeverity, 'none');
 assert.equal(defaults.scope, 'repository');
-assert.equal(defaults.publishCheck, false);
 assert.equal(defaults.uploadArtifacts, false);
 assert.equal(defaults.verbose, true);
 for (const group of [metadata.inputs, metadata.outputs]) for (const value of Object.values(group) as {description: string}[]) assert.ok(value.description);
