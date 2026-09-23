@@ -64,11 +64,15 @@ await testDisallowedProfileGivesAdminGuidance();
 await testOtherManagedPolicyRejectionIsGeneric();
 await testMergedProfileCollisionFailsClosed();
 await testLiteralProtoKeyCollisionFailsClosed();
+await testSelectedProfileClassificationRequiresVerifiedString();
 await testMalformedAndUnsupportedResponsesFailClosed();
 await testEarlyExecutableExitIsNotVersionError();
-await testNonVersionJsonRpcFailureIsSafe();
+await testUnexpectedTerminationRemainsRetryable();
+await testStdioFailuresRemainRetryable();
+await testUnknownJsonRpcFailuresRemainRetryableAndSafe();
 await testRuntimeFallbackWarningClassification();
 await testSpawnErrorFailsClosed();
+await testMissingWorkerDirectoryRemainsRetryable();
 await testAbortKillsPreflightChild();
 
 async function testAllowedProfileAndRawArgv() {
@@ -289,7 +293,7 @@ async function testMalformedStreamFailsClosed() {
         await assert.rejects(
           preflight(codexPath, cwd),
           (error) =>
-            error?.name === "DeepScanNonRetryableError" &&
+            error?.name === "Error" &&
             error.message.includes("with this Codex configuration"),
         );
         await assertPreflightStopped(children, terminatedPath);
@@ -311,7 +315,7 @@ async function testRepeatedCatalogCursorFailsClosed() {
       await assert.rejects(
         preflight(codexPath, cwd),
         (error) =>
-          error?.name === "DeepScanNonRetryableError" &&
+          error?.name === "Error" &&
           error.message.includes("with this Codex configuration"),
       );
       const calls = await readJsonLines(callsPath);
@@ -434,6 +438,29 @@ async function testLiteralProtoKeyCollisionFailsClosed() {
   );
 }
 
+async function testSelectedProfileClassificationRequiresVerifiedString() {
+  for (const selected of [undefined, null, 17, ":read-only"]) {
+    const configResult = configReadResult(expectedProfile);
+    configResult.config.default_permissions = selected;
+    await withFakeCodex(
+      {
+        configResult,
+        catalogResults: [catalogResult(true)],
+      },
+      async ({ codexPath, cwd, terminatedPath, children }) => {
+        await assert.rejects(preflight(codexPath, cwd), (error) =>
+          selected === ":read-only"
+            ? error?.name === "DeepScanNonRetryableError" &&
+              error.message.includes("did not select the required")
+            : error?.name === "Error" &&
+              error.message.includes("with this Codex configuration"),
+        );
+        await assertPreflightStopped(children, terminatedPath);
+      },
+    );
+  }
+}
+
 async function testMalformedAndUnsupportedResponsesFailClosed() {
   await withFakeCodex(
     {
@@ -449,7 +476,7 @@ async function testMalformedAndUnsupportedResponsesFailClosed() {
       await assert.rejects(
         preflight(codexPath, cwd),
         (error) =>
-          error?.name === "DeepScanNonRetryableError" &&
+          error?.name === "Error" &&
           error.message.includes("with this Codex configuration"),
       );
     },
@@ -466,16 +493,9 @@ async function testMalformedAndUnsupportedResponsesFailClosed() {
       await assert.rejects(
         preflight(codexPath, cwd),
         (error) =>
-          error?.name === "DeepScanNonRetryableError" &&
-          error.message.includes(JSON.stringify(codexPath)) &&
-          error.message.includes("permissionProfile/list.allowed") &&
-          error.message.includes("does not support") &&
-          error.message.includes(
-            "Update the Codex installation at that path",
-          ) &&
-          error.message.includes("desktop app if it is bundled") &&
-          error.message.includes("otherwise the selected CLI") &&
-          !error.message.includes("host/CLI"),
+          error?.name === "Error" &&
+          error.message.includes("with this Codex configuration") &&
+          !error.message.includes("does not support"),
       );
     },
   );
@@ -516,7 +536,7 @@ async function testEarlyExecutableExitIsNotVersionError() {
       await assert.rejects(
         preflight(codexPath, cwd),
         (error) =>
-          error?.name === "DeepScanNonRetryableError" &&
+          error?.name === "Error" &&
           error.message.includes(JSON.stringify(codexPath)) &&
           error.message.includes(
             "exited before permission-profile verification completed",
@@ -531,29 +551,84 @@ async function testEarlyExecutableExitIsNotVersionError() {
   );
 }
 
-async function testNonVersionJsonRpcFailureIsSafe() {
+async function testUnexpectedTerminationRemainsRetryable() {
   await withFakeCodex(
     {
-      methodErrors: {
-        "config/read": {
-          code: -32603,
-          message: "SECRET_REPOSITORY_PATH=/repo/private",
-        },
-      },
+      hangAt: "config/read",
     },
-    async ({ codexPath, cwd }) => {
+    async ({ codexPath, cwd, readyPath, children }) => {
+      const running = preflight(codexPath, cwd);
+      await waitForFile(readyPath);
+      assert.equal(children.length, 1);
+      children[0].kill("SIGKILL");
       await assert.rejects(
-        preflight(codexPath, cwd),
+        running,
         (error) =>
-          error?.name === "DeepScanNonRetryableError" &&
+          error?.name === "Error" &&
           error.message.includes(JSON.stringify(codexPath)) &&
-          error.message.includes("config/read") &&
-          error.message.includes("JSON-RPC code -32603") &&
-          !error.message.includes("SECRET_REPOSITORY_PATH") &&
+          error.message.includes("signal SIGKILL") &&
           !error.message.includes("does not support"),
       );
+      assert.equal(children[0].signalCode, "SIGKILL");
     },
   );
+}
+
+async function testStdioFailuresRemainRetryable() {
+  for (const stream of ["stdin", "stdout"]) {
+    await withFakeCodex(
+      { hangAt: "initialize" },
+      async ({ codexPath, cwd, readyPath, terminatedPath, children }) => {
+        const running = preflight(codexPath, cwd);
+        await waitForFile(readyPath);
+        assert.equal(children.length, 1);
+        children[0][stream].destroy(
+          new Error("SECRET_REPOSITORY_PATH=/repo/private"),
+        );
+        await assert.rejects(
+          running,
+          (error) =>
+            error?.name === "Error" &&
+            error.message.includes(JSON.stringify(codexPath)) &&
+            error.message.includes(
+              "could not exchange app-server JSON-RPC over stdio",
+            ) &&
+            !error.message.includes("SECRET_REPOSITORY_PATH"),
+        );
+        await assertPreflightStopped(children, terminatedPath);
+      },
+    );
+  }
+}
+
+async function testUnknownJsonRpcFailuresRemainRetryableAndSafe() {
+  for (const code of [-32603, -32602, -32000, undefined]) {
+    await withFakeCodex(
+      {
+        methodErrors: {
+          "config/read": {
+            ...(code === undefined ? {} : { code }),
+            message: "SECRET_REPOSITORY_PATH=/repo/private",
+          },
+        },
+      },
+      async ({ codexPath, cwd, terminatedPath, children }) => {
+        await assert.rejects(
+          preflight(codexPath, cwd),
+          (error) =>
+            error?.name === "Error" &&
+            error.message.includes(JSON.stringify(codexPath)) &&
+            error.message.includes("config/read") &&
+            (code === undefined
+              ? !error.message.includes("JSON-RPC code")
+              : error.message.includes(`JSON-RPC code ${code}`)) &&
+            !error.message.includes("SECRET_REPOSITORY_PATH") &&
+            !error.message.includes("does not support"),
+        );
+        await assertPreflightStopped(children, terminatedPath);
+      },
+    );
+  }
 }
 
 async function testSpawnErrorFailsClosed() {
@@ -561,13 +636,27 @@ async function testSpawnErrorFailsClosed() {
   await assert.rejects(
     preflight(missingCodex, tmpdir()),
     (error) =>
-      error?.name === "DeepScanNonRetryableError" &&
+      error?.name === "Error" &&
+      error.cause?.code === "ENOENT" &&
       error.message.includes(JSON.stringify(missingCodex)) &&
       error.message.includes("could not start") &&
       error.message.includes("with --version") &&
       error.message.includes("CODEX_CLI_PATH/PATH") &&
       !error.message.includes("does not support"),
   );
+}
+
+async function testMissingWorkerDirectoryRemainsRetryable() {
+  await withFakeCodex({}, async ({ codexPath, cwd, argvPath }) => {
+    await assert.rejects(
+      preflight(codexPath, path.join(cwd, "missing-worker-directory")),
+      (error) =>
+        error?.name === "Error" &&
+        error.cause?.code === "ENOENT" &&
+        error.message.includes("could not start"),
+    );
+    await assert.rejects(readFile(argvPath), { code: "ENOENT" });
+  });
 }
 
 async function testRuntimeFallbackWarningClassification() {
@@ -721,20 +810,24 @@ async function withFakeCodex(
         await copyFile(process.execPath, codexPath);
         assert.ok(codexPath.length > 260);
       }
-      childProcess.spawn = (command, args, options) => {
-        if (
-          command !== codexPath &&
-          command !== path.toNamespacedPath(codexPath)
-        ) {
-          return originalSpawn(command, args, options);
-        }
-        // Reuse the protocol script without replacing or normalizing the executable.
-        const child = originalSpawn(command, [scriptPath, ...args], options);
-        children.push(child);
-        return child;
-      };
-      syncBuiltinESMExports();
     }
+    childProcess.spawn = (command, args, options) => {
+      if (
+        command !== codexPath &&
+        command !== path.toNamespacedPath(codexPath)
+      ) {
+        return originalSpawn(command, args, options);
+      }
+      // Reuse the protocol script without replacing or normalizing the executable.
+      const child = originalSpawn(
+        command,
+        process.platform === "win32" ? [scriptPath, ...args] : args,
+        options,
+      );
+      children.push(child);
+      return child;
+    };
+    syncBuiltinESMExports();
     await callback({
       codexPath,
       cwd: root,

@@ -640,13 +640,12 @@ export class DeepScanWorkerRunner {
           );
         }
         const normalized = asError(error);
-        const policyRefusal =
-          input.kind === "discovery" &&
-          isCodexCybersecurityPolicyRefusal(normalized);
         const retryable = !(normalized instanceof DeepScanNonRetryableError);
+        const policyRefusal =
+          retryable && isCodexCybersecurityPolicyRefusal(normalized);
         if (policyRefusal || !retryable || attempt === maximumAttempts) {
           const replaceableFailureKind =
-            input.kind === "discovery" && (policyRefusal || retryable)
+            input.kind === "discovery" && retryable
               ? policyRefusal
                 ? "policy_refusal"
                 : validationStarted

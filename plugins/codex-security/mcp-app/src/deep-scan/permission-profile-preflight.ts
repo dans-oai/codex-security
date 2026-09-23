@@ -2,10 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface, type Interface } from "node:readline";
 import { isDeepStrictEqual } from "node:util";
 import { MCP_APP_VERSION } from "../version.js";
-import {
-  classifyCodexWorkerError,
-  DeepScanNonRetryableError,
-} from "./errors.js";
+import { DeepScanNonRetryableError } from "./errors.js";
 import { executablePathForSpawn } from "./executable-path.js";
 
 export const DEEP_SCAN_WORKER_PERMISSION_PROFILE_ID =
@@ -194,12 +191,6 @@ class AppServerPreflightClient {
         if (!entry || typeof entry.id !== "string") {
           throw malformedPreflightError();
         }
-        if (!Object.prototype.hasOwnProperty.call(entry, "allowed")) {
-          throw unsupportedCodexApiError(
-            this.options.codexPath,
-            "permissionProfile/list.allowed",
-          );
-        }
         if (typeof entry.allowed !== "boolean") throw malformedPreflightError();
         if (
           entry.description !== null &&
@@ -368,7 +359,12 @@ function verifyPreflightResult(
   const actualProfile = permissions
     ? record(permissions[options.profileId])
     : undefined;
-  if (!config || !permissions || !actualProfile)
+  if (
+    !config ||
+    !permissions ||
+    !actualProfile ||
+    typeof config.default_permissions !== "string"
+  )
     throw malformedPreflightError();
 
   if (config.default_permissions !== options.profileId) {
@@ -474,6 +470,8 @@ function hasOwn(value: JsonRecord, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
 
+// Verified permission incompatibilities explicitly stop the scan. A failed
+// transport attempt alone does not establish that the scan cannot proceed.
 function disallowedProfileAllowlistError(
   profileId: string,
 ): DeepScanNonRetryableError {
@@ -502,8 +500,8 @@ function profileCollisionError(profileId: string): DeepScanNonRetryableError {
   );
 }
 
-function malformedPreflightError(): DeepScanNonRetryableError {
-  return new DeepScanNonRetryableError(
+function malformedPreflightError(): Error {
+  return new Error(
     "Deep Scan cannot safely verify its read-only worker permission profile with this Codex configuration. Deep Scan did not run.",
   );
 }
@@ -529,11 +527,11 @@ function jsonRpcPreflightError(
   codexPath: string,
   method: string,
   value: unknown,
-): DeepScanNonRetryableError {
+): Error {
   const code = jsonRpcErrorCode(value);
   if (code === -32601) return unsupportedCodexApiError(codexPath, method);
   const codeDetail = code === undefined ? "" : " (JSON-RPC code " + code + ")";
-  return new DeepScanNonRetryableError(
+  return new Error(
     "Deep Scan cannot safely verify its read-only worker permission profile because " +
       "the selected Codex executable " +
       quotedExecutable(codexPath) +
@@ -551,17 +549,14 @@ function codexExecutableStartError(codexPath: string, error: Error): Error {
     codexPath,
     "could not start" + codeDetail,
   );
-  const classified = classifyCodexWorkerError(error);
-  return classified instanceof DeepScanNonRetryableError
-    ? new DeepScanNonRetryableError(message, { cause: classified })
-    : new Error(message, { cause: classified });
+  return new Error(message, { cause: error });
 }
 
 function codexExecutableExitError(
   codexPath: string,
   code: number | null,
   signal: NodeJS.Signals | null,
-): DeepScanNonRetryableError {
+): Error {
   const detail =
     code !== null
       ? "exited before permission-profile verification completed with code " +
@@ -573,22 +568,15 @@ function codexExecutableExitError(
   return codexExecutableFailureError(codexPath, detail);
 }
 
-function codexExecutableStdioError(
-  codexPath: string,
-): DeepScanNonRetryableError {
+function codexExecutableStdioError(codexPath: string): Error {
   return codexExecutableFailureError(
     codexPath,
     "could not exchange app-server JSON-RPC over stdio",
   );
 }
 
-function codexExecutableFailureError(
-  codexPath: string,
-  detail: string,
-): DeepScanNonRetryableError {
-  return new DeepScanNonRetryableError(
-    codexExecutableFailureMessage(codexPath, detail),
-  );
+function codexExecutableFailureError(codexPath: string, detail: string): Error {
+  return new Error(codexExecutableFailureMessage(codexPath, detail));
 }
 
 function codexExecutableFailureMessage(
