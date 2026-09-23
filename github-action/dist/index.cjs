@@ -55400,7 +55400,7 @@ function parseInputs(read, workspace) {
       throw new Error(`${name} must contain literal repository-relative paths, without globs or '..'.`);
     return value;
   };
-  const paths = list("paths").map((v) => safeRelative("paths", v));
+  const paths = [...new Set(list("paths").map((v) => safeRelative("paths", v).split("/").filter((part) => part && part !== ".").join("/") || "."))];
   const scope = choice("scope", ["repository", "diff", "working-tree"], "repository");
   if (scope !== "repository" && paths.length)
     throw new Error(`paths cannot be combined with scope: ${scope}. Remove paths to scan changes, or use scope: repository to scan selected paths.`);
@@ -99512,8 +99512,7 @@ async function runAction(actionRoot, overrides = {}) {
       try {
         await summary.addRaw(finalSummary).write();
       } catch {
-        finalized = false;
-        error("Could not write the job summary.");
+        warning("Could not write the job summary.");
       }
     }
     if (check) {

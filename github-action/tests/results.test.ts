@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { analyzeResults, readReportFile, type ResultOptions } from '../src/results.js';
 import { exportSarifArgs } from '../src/sarif.js';
+import { parseInputs } from '../src/inputs.js';
 
 async function fixture(t: { after(fn: () => Promise<void>): void }): Promise<ResultOptions> {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'codex-results-test-')));
@@ -75,6 +76,25 @@ test('rejects wrong revision, paths and coverage mode', async (t) => {
     const result = await analyzeResults({ ...opts, expected });
     assert.equal(result.scanStatus, 'failed'); assert.equal(result.canonicalValid, false); assert.equal(result.sarifUploadReady, false);
   }
+});
+test('equivalent input path spellings accept the completed normalized scope', async (t) => {
+  const opts = await fixture(t);
+  await change(opts, 'coverage.json', (value) => { value.mode = 'scoped_path'; value.includePaths = ['src']; });
+  await change(opts, 'scan-manifest.json', (value) => { value.scan.scope.includePaths = ['src']; });
+  for (const mode of ['standard', 'deep'] as const) {
+    opts.expected.mode = mode;
+    for (const paths of ['src', './src', 'src/', 'src\nsrc', './src/\nsrc']) {
+      opts.expected.paths = parseInputs(name => name === 'paths' ? paths : '', '/checkout').paths;
+      const result = await analyzeResults(opts);
+      assert.deepEqual(result.errors, [], `${mode}: ${paths}`);
+      assert.equal(result.scanStatus, 'completed');
+      assert.equal(result.sarifUploadReady, true);
+    }
+  }
+  opts.expected.paths = ['lib'];
+  const mismatch = await analyzeResults(opts);
+  assert.equal(mismatch.scanStatus, 'failed');
+  assert.ok(mismatch.errors.includes('Reported scope does not match requested paths.'));
 });
 test('digest and scan identity mismatches fail closed', async (t) => {
   const opts = await fixture(t); await change(opts, 'findings.json', (value) => { value.scanId = 'other-scan'; }, false);

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import * as core from '@actions/core';
 import { runAction } from '../src/main.js';
 import { INPUT_NAMES } from '../src/inputs.js';
 import { gitEnvironment } from '../src/targets.js';
@@ -191,6 +192,24 @@ test('scheduled complete report-only scan succeeds', async (t) => {
   assert.match(result.logs, /Scan: completed; findings policy: passed; report: ready/);
   assert.match(result.logs, /Estimated cost: \$0.1250/);
 });
+
+for (const threshold of ['none', 'high']) {
+  test(`summary write failure preserves the scan result with severity threshold ${threshold}`, async (t) => {
+    const app = await harness(t);
+    app.setInput('summary', 'true'); app.setInput('fail-on-severity', threshold);
+    t.mock.method(core.summary, 'write', async () => { throw new Error('Synthetic summary write failure'); });
+    t.after(() => { core.summary.emptyBuffer(); });
+    const result = await app.run();
+    assert.equal(result.exitCode, threshold === 'none' ? 0 : 1);
+    assert.equal(result.outputs['scan-status'], 'completed');
+    assert.equal(result.outputs['policy-status'], threshold === 'none' ? 'passed' : 'failed');
+    assert.equal(result.outputs['report-status'], 'ready');
+    assert.equal(result.outputs['sarif-upload-ready'], 'true');
+    assert.ok(result.outputs['sarif-path']);
+    assert.equal(result.cleanups, 1);
+    assert.match(result.logs, /::warning::Could not write the job summary\./);
+  });
+}
 
 test('verbose false suppresses CLI diagnostics but retains lifecycle and results', async (t) => {
   const app = await harness(t); app.setInput('verbose', 'false'); const result = await app.run();

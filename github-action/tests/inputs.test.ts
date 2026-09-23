@@ -34,6 +34,12 @@ test('path lists accept spaces but reject traversal, globs, and option injection
   for (const paths of ['/etc','../other','src/../../other','src/*','--output-dir','a\\b','C:/other','x\u0000'])
     assert.throws(() => parse({paths}));
 });
+test('CLI path arguments use normalized, deduplicated repository-relative paths', () => {
+  const input = parse({paths:'./src\nsrc/\nsrc\n./lib//./my folder/\n./\n.'});
+  assert.deepEqual(input.paths, ['src', 'lib/my folder', '.']);
+  const args = scanArguments(input, {repository:'/checkout'}, '/results', '/usr/bin/python3');
+  assert.deepEqual(args.flatMap((arg, index) => arg === '--path' ? [args[index + 1]] : []), input.paths);
+});
 test('config cannot override credentials, executables, approval or supplied model', () => {
   for (const entry of ['approval_policy="never"','approval_policy="on-request"','model="x"','profile="x"','mcp_servers.x.command="evil"','plugins=[]','analytics.enabled="false"','analytics.enabled=false\nanalytics.enabled=true'])
     assert.throws(() => parse({'codex-config':entry}));

@@ -1,5 +1,5 @@
 // Runs the SHIPPED action in a temporary checkout with dry-run and no secrets.
-import { mkdtemp, writeFile, readFile, rm, readdir, realpath, lstat } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile, readFile, rm, readdir, realpath, lstat } from 'node:fs/promises';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -48,12 +48,22 @@ try {
     const runtimeRoot = /^runtime-root<<([^\n]+)\n([^\n]+)\n\1$/m.exec(state)?.[2];
     const runtimeTempRoot = /^runtime-temp-root<<([^\n]+)\n([^\n]+)\n\1$/m.exec(state)?.[2];
     assert.ok(runtimeRoot && runtimeTempRoot, 'Main entrypoint must save cleanup state');
-    const post = spawnSync(process.execPath, [resolve(repositoryRoot, metadata.runs.post)], {
-      cwd: root, encoding: 'utf8', timeout: 10_000,
-      env: {...baseEnv, 'STATE_runtime-root': runtimeRoot, 'STATE_runtime-temp-root': runtimeTempRoot},
-    });
-    assert.equal(post.status, 0, `Post entrypoint failed: ${post.stderr}`);
+    const runPost = async () => {
+      const post = spawnSync(process.execPath, [resolve(repositoryRoot, metadata.runs.post)], {
+        cwd: root, encoding: 'utf8', timeout: 10_000,
+        env: {...baseEnv, 'STATE_runtime-root': runtimeRoot, 'STATE_runtime-temp-root': runtimeTempRoot},
+      });
+      assert.equal(post.status, 0, `Post entrypoint failed: ${post.stderr}`);
+      await assert.rejects(lstat(runtimeRoot), {code: 'ENOENT'});
+    };
+    // Main already cleaned up; post must tolerate the absent runtime.
     await assert.rejects(lstat(runtimeRoot), {code: 'ENOENT'});
-    console.log('Packaged Linux action installed the locked CLI, passed dry-run, and ran post cleanup without credentials or model calls.');
+    await runPost();
+    // Simulate a runtime left behind when main could not finish cleanup.
+    await mkdir(join(runtimeRoot, 'home'), {recursive: true, mode: 0o700});
+    await writeFile(join(runtimeRoot, '.codex-security-action-owned'), 'codex-security-action-v1\n', {mode: 0o600});
+    await writeFile(join(runtimeRoot, 'home', 'auth.json'), '{"token":"synthetic-smoke-token"}\n', {mode: 0o600});
+    await runPost();
+    console.log('Packaged Linux action installed the locked CLI, passed dry-run, and verified post cleanup for absent and leftover runtimes without credentials or model calls.');
   } finally { await rm(commandRoot,{recursive:true,force:true}); }
 } finally { await rm(root,{recursive:true,force:true}); }

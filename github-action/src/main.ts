@@ -207,7 +207,7 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
     }
     if (inputs?.summary !== false) {
       try { await core.summary.addRaw(finalSummary).write(); }
-      catch { finalized = false; core.error('Could not write the job summary.'); }
+      catch { core.warning('Could not write the job summary.'); }
     }
     if (check) {
       try { await check.complete(success && finalized, finalTitle, finalSummary); }
