@@ -55330,7 +55330,6 @@ var import_promises8 = require("node:fs/promises");
 var import_node_path6 = require("node:path");
 
 // src/inputs.ts
-var CLI_VERSION = "0.1.30";
 var INPUT_NAMES = [
   "repository",
   "scope",
@@ -55352,12 +55351,9 @@ var INPUT_NAMES = [
   "max-discovery-runs",
   "max-time-hours",
   "codex-config",
-  "provider",
-  "auth",
   "safety-identifier",
   "verbose",
   "dry-run",
-  "cli-version",
   "publish-check",
   "check-name",
   "github-token",
@@ -55421,9 +55417,6 @@ function parseInputs(read, workspace) {
     maxTimeHours: num("max-time-hours", false, Number.MIN_VALUE, 96)
   };
   if (mode !== "deep" && Object.values(deep).some((v) => v !== void 0)) throw new Error("workers, subagents, and discovery limits require mode: deep.");
-  choice("auth", ["api-key"], "api-key");
-  choice("provider", ["openai"], "openai");
-  const cliVersion = choice("cli-version", [CLI_VERSION], CLI_VERSION);
   const codexConfig = list("codex-config");
   const keys = /* @__PURE__ */ new Set();
   for (const entry of codexConfig) {
@@ -55469,7 +55462,6 @@ function parseInputs(read, workspace) {
     safetyIdentifier,
     verbose: bool("verbose", true),
     dryRun,
-    cliVersion,
     publishCheck,
     checkName,
     githubToken,
@@ -55906,7 +55898,7 @@ async function trustedNpm(fs8 = { regularFile: (path4) => regularFile(path4, fal
   throw new Error("A trusted npm installation is required. Use an Ubuntu GitHub-hosted runner with Node 24 in /opt/hostedtoolcache/node (actions/setup-node can prepare it); npm from the checkout or PATH is not accepted.");
 }
 async function setupRuntime(options) {
-  if (options.version !== SUPPORTED_CLI_VERSION) throw new Error(`cli-version must be ${SUPPORTED_CLI_VERSION}; other versions have no reviewed runtime lock.`);
+  if (options.version !== SUPPORTED_CLI_VERSION) throw new Error(`Runtime version must be ${SUPPORTED_CLI_VERSION}; other versions have no reviewed runtime lock.`);
   if (process.platform !== "linux" || process.arch !== "x64") throw new Error("Codex Security Action currently supports Linux x64 runners only.");
   if (Number(process.versions.node.split(".")[0]) !== 24) throw new Error("Codex Security Action requires the Node 24 GitHub Actions runtime.");
   if (!(0, import_node_path3.isAbsolute)(options.actionRoot) || !(0, import_node_path3.isAbsolute)(options.tempRoot)) throw new Error("Action and temporary roots must be absolute.");
@@ -99382,11 +99374,11 @@ async function runAction(actionRoot, overrides = {}) {
       if (!inputs.dryRun && (!apiKey || /[\r\n\u0000]/.test(apiKey))) throw new Error("Set the CODEX_SECURITY_API_KEY repository secret and pass it as OPENAI_API_KEY to this step. No scan was started.");
       tempRoot = await (0, import_promises8.realpath)(process.env.RUNNER_TEMP ?? "");
       if (!process.env.RUNNER_TEMP) throw new Error("RUNNER_TEMP is required.");
-      info(`Preparing Codex Security ${inputs.cliVersion}. Scope: ${inputs.scope}; mode: ${inputs.mode}; effort: ${inputs.effort}.`);
+      info(`Preparing Codex Security ${SUPPORTED_CLI_VERSION}. Scope: ${inputs.scope}; mode: ${inputs.mode}; effort: ${inputs.effort}.`);
       const preparationStarted = performance.now();
       let timer = heartbeat("CLI preparation", preparationStarted);
       try {
-        runtime = await deps.setupRuntime({ actionRoot, tempRoot, version: inputs.cliVersion, log: info });
+        runtime = await deps.setupRuntime({ actionRoot, tempRoot, version: SUPPORTED_CLI_VERSION, log: info });
       } finally {
         clearInterval(timer);
       }
@@ -99440,7 +99432,7 @@ async function runAction(actionRoot, overrides = {}) {
         }
         const resultOptions = {
           resultsDirectory: runtime.resultsDirectory,
-          cliVersion: inputs.cliVersion,
+          cliVersion: SUPPORTED_CLI_VERSION,
           exitCode: interrupted || checkoutError ? 2 : execution.exitCode,
           expected: {
             scope: inputs.scope,

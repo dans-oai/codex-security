@@ -44,9 +44,6 @@ test('config cannot override credentials, executables, approval or supplied mode
   for (const entry of ['approval_policy="never"','approval_policy="on-request"','model="x"','profile="x"','mcp_servers.x.command="evil"','plugins=[]','analytics.enabled="false"','analytics.enabled=false\nanalytics.enabled=true'])
     assert.throws(() => parse({'codex-config':entry}));
   assert.equal(parse({'codex-config':'analytics.enabled=false\nfeatures.multi_agent_v2.max_concurrent_threads_per_session=4'}).codexConfig.length, 2);
-  assert.throws(() => parse({'cli-version':'latest'}));
-  assert.throws(() => parse({'cli-version':'file:./evil'}));
-  assert.throws(() => parse({'provider':'openrouter'}));
   assert.throws(() => parse({'model':'--plugin-path=evil'}), /not a CLI option/);
   assert.throws(() => parse({'safety-identifier':'--patch'}), /hyphen/);
 });
@@ -59,6 +56,8 @@ test('check publication requires credentials and cannot be a dry-run', () => {
 test('CLI arguments preserve literal values and enforce CI policy', () => {
   const input = parse({paths:'src/my folder',model:'model; echo never-execute', 'max-cost':'5', 'fail-on-severity':'high'});
   const args = scanArguments(input, {repository:'/checkout'}, '/private/results', '/usr/bin/python3');
+  assert.equal(args[args.indexOf('--provider') + 1], 'openai');
+  assert.equal(args[args.indexOf('--auth') + 1], 'api-key');
   assert.ok(args.includes('model; echo never-execute')); assert.ok(args.includes('src/my folder'));
   assert.ok(!args.some(arg => arg.startsWith('approval_policy=')));
   assert.ok(!args.some(arg => arg.startsWith('approvals_reviewer=')));

@@ -140,7 +140,7 @@ export async function trustedNpm(fs: {
 }
 
 export async function setupRuntime(options: RuntimeOptions): Promise<Runtime> {
-  if (options.version !== SUPPORTED_CLI_VERSION) throw new Error(`cli-version must be ${SUPPORTED_CLI_VERSION}; other versions have no reviewed runtime lock.`);
+  if (options.version !== SUPPORTED_CLI_VERSION) throw new Error(`Runtime version must be ${SUPPORTED_CLI_VERSION}; other versions have no reviewed runtime lock.`);
   if (process.platform !== 'linux' || process.arch !== 'x64') throw new Error('Codex Security Action currently supports Linux x64 runners only.');
   if (Number(process.versions.node.split('.')[0]) !== 24) throw new Error('Codex Security Action requires the Node 24 GitHub Actions runtime.');
   if (!isAbsolute(options.actionRoot) || !isAbsolute(options.tempRoot)) throw new Error('Action and temporary roots must be absolute.');

@@ -1,10 +1,9 @@
-export const CLI_VERSION = '0.1.30';
 export const INPUT_NAMES = [
   'repository', 'scope', 'paths', 'diff-base', 'diff-head', 'working-tree-base',
   'mode', 'model', 'effort', 'max-cost', 'fail-on-severity', 'knowledge-base',
   'scan-prompt-file', 'validation-prompt-file', 'workers', 'subagents',
   'stop-after-no-new', 'max-discovery-runs', 'max-time-hours', 'codex-config',
-  'provider', 'auth', 'safety-identifier', 'verbose', 'dry-run', 'cli-version',
+  'safety-identifier', 'verbose', 'dry-run',
   'publish-check', 'check-name', 'github-token', 'summary', 'annotations',
   'upload-artifacts', 'artifact-name', 'retention-days',
 ] as const;
@@ -36,7 +35,6 @@ export interface Inputs {
   safetyIdentifier?: string;
   verbose: boolean;
   dryRun: boolean;
-  cliVersion: typeof CLI_VERSION;
   publishCheck: boolean;
   checkName: string;
   githubToken: string;
@@ -101,9 +99,6 @@ export function parseInputs(read: (name: string) => string, workspace: string): 
     maxTimeHours: num('max-time-hours', false, Number.MIN_VALUE, 96),
   };
   if (mode !== 'deep' && Object.values(deep).some(v => v !== undefined)) throw new Error('workers, subagents, and discovery limits require mode: deep.');
-  choice('auth', ['api-key'], 'api-key');
-  choice('provider', ['openai'], 'openai');
-  const cliVersion = choice('cli-version', [CLI_VERSION], CLI_VERSION);
   const codexConfig = list('codex-config');
   const keys = new Set<string>();
   for (const entry of codexConfig) {
@@ -136,7 +131,7 @@ export function parseInputs(read: (name: string) => string, workspace: string): 
     knowledgeBase: list('knowledge-base').map(v => safeRelative('knowledge-base', v)),
     scanPromptFile: single('scan-prompt-file') ? safeRelative('scan-prompt-file', single('scan-prompt-file')) : undefined,
     validationPromptFile: validationPromptFile ? safeRelative('validation-prompt-file', validationPromptFile) : undefined,
-    ...deep, codexConfig, safetyIdentifier, verbose: bool('verbose', true), dryRun, cliVersion,
+    ...deep, codexConfig, safetyIdentifier, verbose: bool('verbose', true), dryRun,
     publishCheck, checkName, githubToken, summary: bool('summary', true), annotations: bool('annotations', true),
     uploadArtifacts: bool('upload-artifacts', false), artifactName, retentionDays: num('retention-days', true, 1, 90) ?? 7,
   };

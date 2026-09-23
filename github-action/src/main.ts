@@ -3,7 +3,7 @@ import { readFile, lstat, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { INPUT_NAMES, parseInputs, scanArguments, type Inputs } from './inputs.js';
 import { resolveTarget, validateEvent, type EventContext, type Target } from './targets.js';
-import { setupRuntime, cleanupRuntime, runtimeEnvironment, type Runtime } from './runtime.js';
+import { SUPPORTED_CLI_VERSION, setupRuntime, cleanupRuntime, runtimeEnvironment, type Runtime } from './runtime.js';
 import { runProcess, safeLogLines } from './process.js';
 import { analyzeResults, type ScanResults } from './results.js';
 import { exportSarifArgs } from './sarif.js';
@@ -107,10 +107,10 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
       if (!inputs.dryRun && (!apiKey || /[\r\n\u0000]/.test(apiKey))) throw new Error('Set the CODEX_SECURITY_API_KEY repository secret and pass it as OPENAI_API_KEY to this step. No scan was started.');
       tempRoot = await realpath(process.env.RUNNER_TEMP ?? '');
       if (!process.env.RUNNER_TEMP) throw new Error('RUNNER_TEMP is required.');
-      core.info(`Preparing Codex Security ${inputs.cliVersion}. Scope: ${inputs.scope}; mode: ${inputs.mode}; effort: ${inputs.effort}.`);
+      core.info(`Preparing Codex Security ${SUPPORTED_CLI_VERSION}. Scope: ${inputs.scope}; mode: ${inputs.mode}; effort: ${inputs.effort}.`);
       const preparationStarted = performance.now();
       let timer = heartbeat('CLI preparation', preparationStarted);
-      try { runtime = await deps.setupRuntime({actionRoot, tempRoot, version: inputs.cliVersion, log: core.info}); }
+      try { runtime = await deps.setupRuntime({actionRoot, tempRoot, version: SUPPORTED_CLI_VERSION, log: core.info}); }
       finally { clearInterval(timer); }
       core.info(`CLI preparation completed in ${elapsed(preparationStarted)}.`);
       core.saveState('runtime-root', runtime.root);
@@ -152,7 +152,7 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
         let checkoutError = '';
         try { await resolveTarget(inputs, event); }
         catch { checkoutError = 'The source checkout or policy changed during scanning. Results cannot establish a completed scan of the requested revision.'; }
-        const resultOptions = {resultsDirectory: runtime.resultsDirectory, cliVersion: inputs.cliVersion,
+        const resultOptions = {resultsDirectory: runtime.resultsDirectory, cliVersion: SUPPORTED_CLI_VERSION,
           exitCode: interrupted || checkoutError ? 2 : execution.exitCode,
           expected: {scope: inputs.scope, mode: inputs.mode, paths: inputs.paths, scannedSha: target.scannedSha,
             diffBase: target.diffBase ?? target.workingTreeBase, diffHead: target.diffHead, publishable: target.publishable && !interrupted && !checkoutError},
