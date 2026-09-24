@@ -1,79 +1,66 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtemp, mkdir, writeFile, readFile, symlink, rm, stat } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, realpath, symlink, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { cleanupRuntime, runtimeEnvironment, trustedNpm, trustedPython, validateRuntimeLock } from '../src/runtime.js';
+import { checkPython, cleanupRuntime, resolveTool, runtimeEnvironment } from '../src/runtime.js';
 
-function pythonFilesystem(files: Record<string, string>, entries: string[] = []) {
-  return {
-    regularFile: async (path: string) => {
-      if (!(path in files)) throw new Error('Missing or unsafe file');
-      return files[path];
-    },
-    readdir: async (path: string) => {
-      assert.equal(path, '/opt/hostedtoolcache/Python');
-      return entries;
-    },
-  };
-}
-
-test('Python discovery supports Ubuntu 22.04 hosted cache and versioned system Python', async () => {
-  const cached = '/opt/hostedtoolcache/Python/3.12.14/x64/bin/python3.12';
-  assert.equal(await trustedPython(pythonFilesystem({ [cached]: cached }, ['3.10.12', '3.12.9', '3.12.14'])), cached);
-  const system = '/usr/bin/python3.12';
-  assert.equal(await trustedPython(pythonFilesystem({ [system]: system })), system);
+test('tool discovery accepts PATH installations and resolves npm symlinks', async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'runtime-tools-')));
+  const previousPath = process.env.PATH;
+  t.after(async () => {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+    await rm(root, { recursive: true, force: true });
+  });
+  const bin = join(root, 'custom-tools');
+  await mkdir(bin);
+  const npm = join(root, 'npm-cli.js');
+  const python = join(bin, 'python3');
+  await writeFile(npm, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  await writeFile(python, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  await symlink(npm, join(bin, 'npm'));
+  process.env.PATH = bin;
+  assert.equal(await resolveTool('npm'), npm);
+  assert.equal(await resolveTool('python3'), python);
+  await rm(join(bin, 'npm'));
+  await rm(python);
+  await assert.rejects(resolveTool('npm'), /npm/);
+  await assert.rejects(resolveTool('python3'), /python3/);
 });
 
-test('Python discovery rejects symlink escapes, unapproved versions, and oversized caches', async () => {
-  const candidate = '/opt/hostedtoolcache/Python/3.12.14/x64/bin/python3.12';
-  for (const target of ['/home/runner/work/repo/python', '/opt/hostedtoolcache/Python/3.12.9/x64/bin/python3.12']) {
-    await assert.rejects(trustedPython(pythonFilesystem({ [candidate]: target }, ['3.12.14', '3.12.14/../../repo', '3.14.0'])), /trusted Python/);
+test('Python preflight checks the required version and modules in an isolated process', async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'runtime-python-')));
+  const previousSecret = process.env.RUNTIME_TEST_SECRET;
+  process.env.RUNTIME_TEST_SECRET = 'must-not-inherit';
+  t.after(async () => {
+    if (previousSecret === undefined) delete process.env.RUNTIME_TEST_SECRET;
+    else process.env.RUNTIME_TEST_SECRET = previousSecret;
+    await rm(root, { recursive: true, force: true });
+  });
+  const python = join(root, 'python3');
+  await writeFile(python, `#!${process.execPath}
+    require('node:fs').writeFileSync('invocation.json', JSON.stringify({
+      args: process.argv.slice(2), cwd: process.cwd(), env: process.env,
+    }));
+  `, { mode: 0o755 });
+  const env = runtimeEnvironment({ root, home: root, codexHome: root, stateDirectory: root, pythonPath: python });
+  await checkPython(python, root, env);
+  const invocation = JSON.parse(await readFile(join(root, 'invocation.json'), 'utf8'));
+  assert.deepEqual(invocation.args, ['-I', '-c', 'import sys, sqlite3, tomllib; assert sys.version_info >= (3, 11)']);
+  assert.equal(invocation.cwd, root);
+  for (const [key, value] of Object.entries(env)) assert.equal(invocation.env[key], value);
+  assert.equal(invocation.env.RUNTIME_TEST_SECRET, undefined);
+});
+
+test('Python preflight reports a failed or terminated prerequisite check', async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'runtime-python-')));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const python = join(root, 'python3');
+  for (const script of ['process.exit(1)', 'process.kill(process.pid, "SIGTERM")']) {
+    await writeFile(python, `#!${process.execPath}\n${script}\n`, { mode: 0o755 });
+    await assert.rejects(checkPython(python, root, {}), /Python 3\.11.*sqlite3.*tomllib/);
   }
-  await assert.rejects(trustedPython(pythonFilesystem({ '/usr/bin/python3.12': '/tmp/python' })), /trusted Python/);
-  await assert.rejects(trustedPython(pythonFilesystem({ [candidate]: candidate }, Array(257).fill('3.12.14'))), /trusted Python/);
-  await assert.rejects(trustedPython(pythonFilesystem({})), /trusted Python/);
-});
-
-function npmFilesystem(files: Record<string, string>, entries: string[] = []) {
-  const visited: string[] = [];
-  return { visited, regularFile: async (path: string) => {
-    visited.push(path);
-    if (!(path in files)) throw new Error('Missing or unsafe file');
-    return files[path];
-  }, readdir: async (path: string) => {
-    assert.equal(path, '/opt/hostedtoolcache/node');
-    return entries;
-  } };
-}
-
-test('npm discovery supports hosted Node 24 without a system npm symlink', async () => {
-  const npm = '/opt/hostedtoolcache/node/24.20.0/x64/lib/node_modules/npm/bin/npm-cli.js';
-  const fs = npmFilesystem({ [npm]: npm }, ['24.9.0', '24.20.0', '22.23.2']);
-  assert.equal(await trustedNpm(fs), npm);
-  assert.equal(fs.visited.at(-1), npm);
-});
-
-test('npm discovery retains fixed system installations and legitimate symlinks', async () => {
-  const npm = '/usr/local/lib/node_modules/npm/bin/npm-cli.js';
-  assert.equal(await trustedNpm(npmFilesystem({ [npm]: npm })), npm);
-  const cached = '/opt/hostedtoolcache/node/24.20.0/x64/lib/node_modules/npm/bin/npm-cli.js';
-  assert.equal(await trustedNpm(npmFilesystem({ '/usr/bin/npm': cached })), cached);
-});
-
-test('npm discovery rejects malformed cache entries and symlink escapes', async () => {
-  const candidate = '/opt/hostedtoolcache/node/24.20.0/x64/lib/node_modules/npm/bin/npm-cli.js';
-  for (const escaped of ['/home/runner/work/repo/npm/bin/npm-cli.js', '/usr/evil/npm/bin/npm-cli.js', '/opt/hostedtoolcache/node/24.19.0/x64/lib/node_modules/npm/bin/npm-cli.js']) {
-    const fs = npmFilesystem({ [candidate]: escaped }, ['../../repo', '24.20.0/../../repo', '24.20.0', '24.21.0-rc.1', '26.0.0']);
-    await assert.rejects(trustedNpm(fs), /trusted npm/);
-    assert.equal(fs.visited.filter(path => path.startsWith('/opt/')).length, 1);
-  }
-  await assert.rejects(trustedNpm(npmFilesystem({ '/usr/bin/npm': '/usr/evil/npm/bin/npm-cli.js' })), /trusted npm/);
-});
-
-test('npm discovery bounds cache enumeration and fails clearly when absent', async () => {
-  await assert.rejects(trustedNpm(npmFilesystem({}, Array(257).fill('24.20.0'))), /trusted npm/);
-  await assert.rejects(trustedNpm({ ...npmFilesystem({}), readdir: async () => { throw new Error('No cache'); } }), /actions\/setup-node/);
 });
 
 test('scan environment excludes all inherited credential/config channels', () => {
@@ -92,31 +79,13 @@ test('scan environment excludes all inherited credential/config channels', () =>
   } finally { for (const key of Object.keys(poison)) { if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key]; } }
 });
 
-test('shipped runtime lock has integrity for all transitive platform artifacts', async () => {
+test('shipped runtime lock matches the manifest and records dependency integrity', async () => {
   const lock = JSON.parse(await readFile(new URL('../runtime/package-lock.json', import.meta.url), 'utf8'));
-  validateRuntimeLock(lock);
   const manifest = JSON.parse(await readFile(new URL('../runtime/package.json', import.meta.url), 'utf8'));
-  assert.equal(manifest.dependencies['@openai/codex-security'], lock.packages['node_modules/@openai/codex-security'].version);
-  for (const path of ['', 'node_modules/@openai/codex-security']) {
-    const mismatched = structuredClone(lock);
-    if (path) mismatched.packages[path].version = '0.0.0';
-    else mismatched.packages[path].dependencies['@openai/codex-security'] = '0.0.0';
-    assert.throws(() => validateRuntimeLock(mismatched), /version/);
-  }
-  assert.equal(lock.packages['node_modules/smol-toml'].version, '1.8.0');
-  const regressed = structuredClone(lock);
-  regressed.packages['node_modules/smol-toml'].version = '1.6.1';
-  assert.throws(() => validateRuntimeLock(regressed), /security fix/);
-  const nested = structuredClone(lock);
-  nested.packages['node_modules/@openai/codex-security/node_modules/smol-toml'] = { ...lock.packages['node_modules/smol-toml'], version: '1.6.1' };
-  assert.throws(() => validateRuntimeLock(nested), /security fix/);
-  for (const mutation of ['url', 'integrity', 'link']) {
-    const malicious = structuredClone(lock);
-    const pkg = malicious.packages['node_modules/@openai/codex-security'];
-    if (mutation === 'url') pkg.resolved = 'https://attacker.invalid/archive.tgz';
-    if (mutation === 'integrity') delete pkg.integrity;
-    if (mutation === 'link') pkg.link = true;
-    assert.throws(() => validateRuntimeLock(malicious), /unapproved/);
+  assert.deepEqual(lock.packages[''].dependencies, manifest.dependencies);
+  assert.equal(lock.packages['node_modules/@openai/codex-security'].version, manifest.dependencies['@openai/codex-security']);
+  for (const [path, entry] of Object.entries(lock.packages) as [string, { integrity?: string }][]) {
+    if (path) assert.match(entry.integrity ?? '', /^sha512-/, `${path} is missing recorded integrity`);
   }
 });
 

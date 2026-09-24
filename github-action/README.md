@@ -156,8 +156,10 @@ for code scanning availability and permissions.
 ## Runtime
 
 The Action installs a pinned CLI release from npm using a committed dependency
-lock. It runs on Linux x64 with Node 24 and Python 3.11 or 3.12; the Ubuntu 24.04
-runner supplies these prerequisites. Authentication uses `OPENAI_API_KEY`.
+lock. It runs on Linux x64 with Node 24 and Python 3.11 or later; the Ubuntu 24.04
+runner supplies these prerequisites. npm and Python are found on the runner's
+`PATH`; `actions/setup-node` and `actions/setup-python` can select installations.
+Authentication uses `OPENAI_API_KEY`.
 Temporary runtime files are removed after the job; reports remain available to
 downstream steps.
 

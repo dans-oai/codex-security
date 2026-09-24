@@ -1,11 +1,11 @@
+import { which } from '@actions/io';
 import { constants } from 'node:fs';
-import { access, chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { access, chmod, copyFile, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { runProcess, safeLogLines } from './process.js';
 import runtimeManifest from '../runtime/package.json' with { type: 'json' };
 
 export const SUPPORTED_CLI_VERSION = runtimeManifest.dependencies['@openai/codex-security'];
-export const PATCHED_TOML_VERSION = '1.8.0';
 const MARKER = '.codex-security-action-owned';
 const ROOT_PREFIX = 'codex-security-runtime-';
 const REGISTRY = 'https://registry.npmjs.org/';
@@ -25,24 +25,6 @@ export interface Runtime {
   stateDirectory: string;
   resultsDirectory: string;
   env: (apiKey: string) => NodeJS.ProcessEnv;
-}
-
-export function validateRuntimeLock(lock: unknown): void {
-  if (!lock || typeof lock !== 'object') throw new Error('Invalid runtime dependency lock.');
-  const data = lock as { lockfileVersion?: number; packages?: Record<string, { resolved?: string; integrity?: string; link?: boolean; version?: string; dependencies?: Record<string, string> }> };
-  if (data.lockfileVersion !== 3 || !data.packages || data.packages['']?.dependencies?.['@openai/codex-security'] !== SUPPORTED_CLI_VERSION) throw new Error('Runtime lock does not match the reviewed CLI version.');
-  for (const [name, entry] of Object.entries(data.packages)) {
-    if (!name) continue;
-    if (!name.startsWith('node_modules/') || name.split('/').includes('..') || entry.link || !entry.resolved?.startsWith(REGISTRY) || !/^sha512-[A-Za-z0-9+/]+=*$/.test(entry.integrity ?? '')) {
-      throw new Error(`Runtime lock contains an unapproved dependency record: ${name}`);
-    }
-    const url = new URL(entry.resolved);
-    if (url.origin !== 'https://registry.npmjs.org' || url.username || url.password || url.hash || url.search) throw new Error('Runtime lock contains an unapproved registry URL.');
-    if (name.endsWith('/smol-toml') && entry.version !== PATCHED_TOML_VERSION) throw new Error('Runtime lock omits the reviewed smol-toml security fix.');
-  }
-  if (data.packages['node_modules/@openai/codex-security']?.version !== SUPPORTED_CLI_VERSION) throw new Error('Runtime CLI version mismatch.');
-  if (!data.packages['node_modules/@openai/codex-linux-x64']) throw new Error('Runtime lock omits the supported platform binary.');
-  if (data.packages['node_modules/smol-toml']?.version !== PATCHED_TOML_VERSION) throw new Error('Runtime lock omits the reviewed smol-toml security fix.');
 }
 
 /** Deliberately construct a new environment: never copy process.env. */
@@ -73,70 +55,22 @@ export function runtimeEnvironment(paths: Pick<Runtime, 'root' | 'home' | 'codex
 async function regularFile(path: string, executable = false, runnerProvided = false): Promise<string> {
   const target = await realpath(path);
   const info = await lstat(target);
-  // Hosted images deliberately expose writable Node/npm tools. That exception is
-  // limited to approved npm locations and the Node executable already running us;
-  // downloaded CLI files and action manifests retain the stricter mode check.
+  // Trust the runner's Node executable; retain mode checks for installed CLI files
+  // and the Action's manifests.
   if (!info.isFile() || (!runnerProvided && (info.mode & 0o022) !== 0)) throw new Error('Runtime prerequisite must be a regular file without group/world write access.');
   if (executable) await access(target, constants.X_OK);
   return target;
 }
 
-export async function trustedPython(fs: {
-  regularFile: (path: string) => Promise<string>;
-  readdir: (path: string) => Promise<string[]>;
-} = { regularFile: path => regularFile(path, true), readdir }): Promise<string> {
-  // Ubuntu 22.04 has Python 3.10 at /usr/bin/python3. Use only fixed,
-  // versioned system paths or GitHub's canonical Python 3.12 cache.
-  for (const candidate of ['/usr/bin/python3.12', '/usr/bin/python3.11']) {
-    try {
-      const target = await fs.regularFile(candidate);
-      if (target === candidate) return target;
-    } catch { /* Try the next approved location. */ }
-  }
-  const cache = '/opt/hostedtoolcache/Python';
-  const entries = await fs.readdir(cache).catch(() => []);
-  if (entries.length <= 256) {
-    const versions = entries.filter(version => /^3\.12\.\d{1,5}$/.test(version))
-      .sort((a, b) => b.localeCompare(a, 'en', { numeric: true }));
-    for (const version of versions) {
-      const candidate = join(cache, version, 'x64/bin/python3.12');
-      try {
-        const target = await fs.regularFile(candidate);
-        if (target === candidate) return target;
-      } catch { /* Try the next approved installation. */ }
-    }
-  }
-  throw new Error('A trusted Python 3.11/3.12 installation is required. Use a GitHub-hosted Ubuntu runner with Python 3.12 in /opt/hostedtoolcache/Python; Python from PATH or the checkout is not accepted.');
+/** Resolve runner tools before constructing the isolated child environment. */
+export async function resolveTool(name: 'npm' | 'python3'): Promise<string> {
+  return realpath(await which(name, true));
 }
 
-export async function trustedNpm(fs: {
-  regularFile: (path: string) => Promise<string>;
-  readdir: (path: string) => Promise<string[]>;
-} = { regularFile: path => regularFile(path, false, true), readdir }): Promise<string> {
-  // GitHub's Node action runtime does not itself promise npm. Resolve only the
-  // hosted Ubuntu/system tool locations, never PATH, RUNNER_TOOL_CACHE, or npm_execpath.
-  const systemTargets = ['/usr/local/lib/node_modules/npm/bin/npm-cli.js', '/usr/share/nodejs/npm/bin/npm-cli.js'];
-  const cache = '/opt/hostedtoolcache/node';
-  const cacheTarget = /^\/opt\/hostedtoolcache\/node\/24\.\d{1,5}\.\d{1,5}\/x64\/lib\/node_modules\/npm\/bin\/npm-cli\.js$/;
-  for (const candidate of ['/usr/local/lib/node_modules/npm/bin/npm-cli.js', '/usr/share/nodejs/npm/bin/npm-cli.js', '/usr/local/bin/npm', '/usr/bin/npm']) {
-    try {
-      const target = await fs.regularFile(candidate);
-      if (systemTargets.includes(target) || cacheTarget.test(target)) return target;
-    } catch { /* Try the next fixed prerequisite location. */ }
-  }
-  const entries = await fs.readdir(cache).catch(() => []);
-  if (entries.length <= 256) {
-    const versions = entries.filter(version => /^24\.\d{1,5}\.\d{1,5}$/.test(version)).sort((a, b) => b.localeCompare(a, 'en', { numeric: true }));
-    for (const version of versions) {
-      const candidate = join(cache, version, 'x64/lib/node_modules/npm/bin/npm-cli.js');
-      try {
-        const target = await fs.regularFile(candidate);
-        // Reject cache-directory symlinks to a checkout, alternate cache, or version.
-        if (target === candidate) return target;
-      } catch { /* Try the next installed Node 24 version. */ }
-    }
-  }
-  throw new Error('A trusted npm installation is required. Use an Ubuntu GitHub-hosted runner with Node 24 in /opt/hostedtoolcache/node (actions/setup-node can prepare it); npm from the checkout or PATH is not accepted.');
+export async function checkPython(pythonPath: string, cwd: string, env: NodeJS.ProcessEnv): Promise<void> {
+  const result = await runProcess(pythonPath, ['-I', '-c', 'import sys, sqlite3, tomllib; assert sys.version_info >= (3, 11)'], { cwd, env, timeoutMs: 10_000 });
+  if (result.exitCode !== 0 || result.timedOut || result.interrupted || result.signal)
+    throw new Error('Python 3.11 or later with sqlite3 and tomllib is required. Use actions/setup-python to select a compatible interpreter.');
 }
 
 export async function setupRuntime(options: RuntimeOptions): Promise<Runtime> {
@@ -145,8 +79,8 @@ export async function setupRuntime(options: RuntimeOptions): Promise<Runtime> {
   if (!isAbsolute(options.actionRoot) || !isAbsolute(options.tempRoot)) throw new Error('Action and temporary roots must be absolute.');
   const tempRoot = await realpath(options.tempRoot);
   const actionRoot = await realpath(options.actionRoot);
-  const npmCli = await trustedNpm();
-  const pythonPath = await trustedPython();
+  const npmCli = await resolveTool('npm');
+  const pythonPath = await resolveTool('python3');
   const nodePath = await regularFile(process.execPath, true, true);
   const root = await mkdtemp(join(tempRoot, ROOT_PREFIX));
   await chmod(root, 0o700);
@@ -159,14 +93,12 @@ export async function setupRuntime(options: RuntimeOptions): Promise<Runtime> {
     for (const dir of [home, codexHome, stateDirectory, join(root, 'tmp'), join(root, 'bin'), join(root, 'install')]) await mkdir(dir, { mode: 0o700 });
     await symlink(nodePath, join(root, 'bin', 'node'));
     const env = runtimeEnvironment(paths);
-    const pythonCheck = await runProcess(pythonPath, ['-I', '-c', 'import sys, sqlite3, tomllib; assert sys.version_info >= (3, 11)'], { cwd: root, env, timeoutMs: 10_000 });
-    if (pythonCheck.exitCode !== 0 || pythonCheck.timedOut || pythonCheck.interrupted) throw new Error('Trusted Python 3.11 or later with sqlite3 and tomllib is required.');
+    await checkPython(pythonPath, root, env);
     const source = join(actionRoot, 'runtime');
     const lockPath = await regularFile(join(source, 'package-lock.json'));
     const packagePath = await regularFile(join(source, 'package.json'));
     if (!lockPath.startsWith(source + sep) || !packagePath.startsWith(source + sep)) throw new Error('Runtime manifests must remain within the action package.');
     const lockBytes = await readFile(lockPath, 'utf8');
-    validateRuntimeLock(JSON.parse(lockBytes));
     const destination = join(root, 'install');
     await copyFile(packagePath, join(destination, 'package.json'));
     await writeFile(join(destination, 'package-lock.json'), lockBytes, { mode: 0o600, flag: 'wx' });

@@ -1,5 +1,5 @@
 // Runs the SHIPPED action in a temporary checkout with dry-run and no secrets.
-import { mkdir, mkdtemp, writeFile, readFile, rm, readdir, realpath, lstat } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile, readFile, rm, lstat } from 'node:fs/promises';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -8,7 +8,7 @@ import { parse } from 'yaml';
 const repositoryRoot = resolve(import.meta.dirname, '../..');
 const metadata = parse(await readFile(join(repositoryRoot, 'action.yml'), 'utf8'));
 const root = await mkdtemp(join(tmpdir(), 'codex-action-linux-smoke-'));
-const baseEnv = {PATH: '/usr/local/bin:/usr/bin:/bin', HOME: root, GIT_CONFIG_NOSYSTEM:'1', GIT_CONFIG_GLOBAL:'/dev/null'};
+const baseEnv = {PATH: process.env.PATH, HOME: root, GIT_CONFIG_NOSYSTEM:'1', GIT_CONFIG_GLOBAL:'/dev/null'};
 try {
   const git = (...args) => execFileSync('/usr/bin/git', ['-c','user.name=Smoke','-c','user.email=smoke@example.invalid',...args], {cwd:root,env:baseEnv,encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
   git('init','-b','main'); git('remote','add','origin','https://github.com/example/smoke.git');
@@ -29,15 +29,6 @@ try {
     }});
     if (run.status !== 0) {
       console.error(run.stdout); console.error(run.stderr);
-      // Report only fixed prerequisite locations, never environment values or file contents.
-      const cache = '/opt/hostedtoolcache/node';
-      const versions = (await readdir(cache).catch(() => [])).filter(v => /^24\.\d{1,5}\.\d{1,5}$/.test(v)).slice(0, 20);
-      for (const path of ['/usr/local/bin/npm', '/usr/bin/npm', process.execPath, ...versions.map(v => join(cache, v, 'x64/lib/node_modules/npm/bin/npm-cli.js'))]) {
-        try {
-          const resolved = await realpath(path); const info = await lstat(resolved);
-          console.error('Prerequisite:', JSON.stringify({path, resolved, mode:(info.mode & 0o777).toString(8), uid:info.uid, gid:info.gid}));
-        } catch (error) { console.error('Prerequisite:', JSON.stringify({path, code:error.code})); }
-      }
       throw run.error ?? new Error(`Packaged action exited ${run.status}`);
     }
     const output=await readFile(join(commandRoot,'output'),'utf8');
