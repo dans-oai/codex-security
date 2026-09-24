@@ -9,7 +9,6 @@ export interface EventContext {
   sha: string;
   ref: string;
   serverUrl: string;
-  actor: string;
   payload: Record<string, any>;
 }
 export interface Target {
@@ -29,7 +28,6 @@ export function validateEvent(event: EventContext): void {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(event.repository)) throw new Error('GITHUB_REPOSITORY is invalid.');
   // The artifact service implementation is GitHub.com-specific for this release.
   if (event.serverUrl !== 'https://github.com') throw new Error('This release supports GitHub.com only; GitHub Enterprise Server has not been validated.');
-  if (event.actor === 'dependabot[bot]') throw new Error('Dependabot runs are not supported because the model credential is unavailable. This PR has not been scanned.');
   if (event.eventName === 'pull_request') {
     const pr = event.payload.pull_request;
     if (!pr || pr.head?.repo?.full_name !== event.repository || pr.base?.repo?.full_name !== event.repository)

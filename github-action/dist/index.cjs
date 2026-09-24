@@ -55632,7 +55632,6 @@ function validateEvent(event) {
     throw new Error(`Unsupported event: ${event.eventName}. Use pull_request, schedule, workflow_dispatch, or push. Privileged PR source-scanning triggers are not supported.`);
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(event.repository)) throw new Error("GITHUB_REPOSITORY is invalid.");
   if (event.serverUrl !== "https://github.com") throw new Error("This release supports GitHub.com only; GitHub Enterprise Server has not been validated.");
-  if (event.actor === "dependabot[bot]") throw new Error("Dependabot runs are not supported because the model credential is unavailable. This PR has not been scanned.");
   if (event.eventName === "pull_request") {
     const pr = event.payload.pull_request;
     if (!pr || pr.head?.repo?.full_name !== event.repository || pr.base?.repo?.full_name !== event.repository)
@@ -99109,7 +99108,6 @@ async function context5() {
     repository: process.env.GITHUB_REPOSITORY ?? "",
     sha: process.env.GITHUB_SHA ?? "",
     ref: process.env.GITHUB_REF ?? "",
-    actor: process.env.GITHUB_ACTOR ?? "",
     serverUrl: process.env.GITHUB_SERVER_URL ?? "",
     payload
   };
@@ -99179,7 +99177,7 @@ async function runAction(actionRoot, overrides = {}) {
       finalSummary = "The requested diff is empty. No scan ran and no model cost was incurred.";
       info(finalSummary);
     } else {
-      if (!inputs.dryRun && (!apiKey || /[\r\n\u0000]/.test(apiKey))) throw new Error("Set the CODEX_SECURITY_API_KEY repository secret and pass it as OPENAI_API_KEY to this step. No scan was started.");
+      if (!inputs.dryRun && (!apiKey || /[\r\n\u0000]/.test(apiKey))) throw new Error("Set CODEX_SECURITY_API_KEY in Actions secrets (or Dependabot secrets for Dependabot runs) and pass it as OPENAI_API_KEY to this step. No scan was started.");
       tempRoot = await (0, import_promises8.realpath)(process.env.RUNNER_TEMP ?? "");
       if (!process.env.RUNNER_TEMP) throw new Error("RUNNER_TEMP is required.");
       info(`Preparing Codex Security ${SUPPORTED_CLI_VERSION}. Scope: ${inputs.scope}; mode: ${inputs.mode}; effort: ${inputs.effort}.`);

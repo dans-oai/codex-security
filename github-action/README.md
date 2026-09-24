@@ -65,6 +65,7 @@ concurrency:
 
 jobs:
   security:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     name: Codex Security
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -90,7 +91,15 @@ This job fails on high or critical findings, incomplete scans, and errors.
 File and line annotations are enabled by default.
 
 Use PR scanning for trusted contributors with branches in the calling repository.
-Fork and Dependabot PRs, `pull_request_target`, and `workflow_run` are not supported.
+To scan Dependabot PRs, also configure `CODEX_SECURITY_API_KEY` as a
+[Dependabot secret](https://docs.github.com/en/code-security/reference/supply-chain-security/troubleshoot-dependabot/dependabot-on-actions#accessing-secrets).
+The same workflow uses that secret for Dependabot runs and the Actions secret for
+other runs. Missing credentials fail with setup guidance.
+
+Fork PRs are skipped by this example. GitHub treats skipped jobs as successful
+for required checks; skipped does not mean scanned. `pull_request_target` and
+`workflow_run` are not supported.
+
 The scanner uses applicable `SECURITY.md` guidance from the checked-out revision,
 including policy changes in the PR. Review those changes alongside the code.
 

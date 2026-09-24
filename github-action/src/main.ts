@@ -29,7 +29,7 @@ async function context(): Promise<EventContext> {
   const payload: unknown = JSON.parse(await readFile(path, 'utf8'));
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Invalid GitHub event payload.');
   return {eventName: process.env.GITHUB_EVENT_NAME ?? '', repository: process.env.GITHUB_REPOSITORY ?? '',
-    sha: process.env.GITHUB_SHA ?? '', ref: process.env.GITHUB_REF ?? '', actor: process.env.GITHUB_ACTOR ?? '',
+    sha: process.env.GITHUB_SHA ?? '', ref: process.env.GITHUB_REF ?? '',
     serverUrl: process.env.GITHUB_SERVER_URL ?? '', payload: payload as Record<string, unknown>};
 }
 function outputs(result: ScanResults, target: Target, exitCode: number): void {
@@ -91,7 +91,7 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
       finalSummary = 'The requested diff is empty. No scan ran and no model cost was incurred.';
       core.info(finalSummary);
     } else {
-      if (!inputs.dryRun && (!apiKey || /[\r\n\u0000]/.test(apiKey))) throw new Error('Set the CODEX_SECURITY_API_KEY repository secret and pass it as OPENAI_API_KEY to this step. No scan was started.');
+      if (!inputs.dryRun && (!apiKey || /[\r\n\u0000]/.test(apiKey))) throw new Error('Set CODEX_SECURITY_API_KEY in Actions secrets (or Dependabot secrets for Dependabot runs) and pass it as OPENAI_API_KEY to this step. No scan was started.');
       tempRoot = await realpath(process.env.RUNNER_TEMP ?? '');
       if (!process.env.RUNNER_TEMP) throw new Error('RUNNER_TEMP is required.');
       core.info(`Preparing Codex Security ${SUPPORTED_CLI_VERSION}. Scope: ${inputs.scope}; mode: ${inputs.mode}; effort: ${inputs.effort}.`);

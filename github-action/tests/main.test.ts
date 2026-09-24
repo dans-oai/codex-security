@@ -103,6 +103,7 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
   t.after(() => { core.summary.emptyBuffer(); });
   let capturedArgs: readonly string[] = [];
   let capturedEnvironment: NodeJS.ProcessEnv = {};
+  const processEnvironments: NodeJS.ProcessEnv[] = [];
   async function reports(): Promise<void> {
     await cp(new URL('./fixtures/completed-scan/', import.meta.url), runtime.resultsDirectory, { recursive: true });
     const manifestPath = join(runtime.resultsDirectory, 'scan-manifest.json');
@@ -164,6 +165,7 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
           cleanupRuntime: async () => { cleanups++; if (cleanupFails) throw new Error('Synthetic cleanup failure'); },
           runProcess: async (_executable, args, options): Promise<ProcessResult> => {
             processes++; capturedArgs = args; capturedEnvironment = options.env;
+            processEnvironments.push(options.env);
             options.log?.('[codex-security] Synthetic live CLI progress.');
             if (mutateCheckout) await writeFile(join(repository, 'app.txt'), 'modified while scanning\n');
             const exporting = args[1] === 'export';
@@ -175,7 +177,7 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
         });
         exitCode = process.exitCode;
       } finally { process.stdout.write = originalWrite; process.exitCode = previousExitCode; }
-      return { exitCode, setups, processes, cleanups, summary, args: capturedArgs, environment: capturedEnvironment,
+      return { exitCode, setups, processes, cleanups, summary, args: capturedArgs, environment: capturedEnvironment, processEnvironments,
         outputs: outputValues(await readFile(outputPath, 'utf8')), logs: logs.join('') };
     },
   };
@@ -230,17 +232,31 @@ test('findings below the threshold pass with an explicit outcome', async (t) => 
   assert.match(result.summary, /\*\*Scan completed\. No findings meet the failure threshold\.\*\*/);
 });
 
-test('missing API key reports an incomplete scan with the credential diagnostic', async (t) => {
-  const app = await harness(t); delete process.env.OPENAI_API_KEY;
+test('same-repository Dependabot PR scans with a supplied key kept out of export', async (t) => {
+  const app = await harness(t, 'pr'); process.env.GITHUB_ACTOR = 'dependabot[bot]';
+  app.configure({ missingSarif: true });
   const result = await app.run();
-  assert.equal(result.exitCode, 1); assert.equal(result.processes, 0);
-  assert.equal(result.outputs['policy-status'], 'not-evaluated');
-  assert.equal(result.outputs['sarif-upload-ready'], 'false');
-  assert.match(result.logs, /::error::Scan could not complete\./);
-  assert.match(result.summary, /\*\*Scan could not complete\.\*\*/);
-  assert.match(result.summary, /Set the CODEX_SECURITY_API_KEY repository secret/);
-  assert.doesNotMatch(result.logs, /Findings meet the configured failure threshold/);
+  assert.equal(result.exitCode, 0); assert.equal(result.setups, 1); assert.equal(result.processes, 2);
+  assert.equal(result.outputs['scan-status'], 'completed'); assert.equal(result.outputs['scanned-sha'], app.sha);
+  assert.equal(result.processEnvironments[0].OPENAI_API_KEY, 'synthetic-offline-test-key');
+  assert.equal(result.processEnvironments[1].OPENAI_API_KEY, undefined);
+  assert.equal(result.outputs['sarif-upload-ready'], 'true');
 });
+
+for (const scenario of ['schedule', 'pr'] as const) {
+  test(`missing API key fails a ${scenario === 'pr' ? 'Dependabot PR' : 'scheduled scan'} with setup guidance`, async (t) => {
+    const app = await harness(t, scenario); delete process.env.OPENAI_API_KEY;
+    if (scenario === 'pr') process.env.GITHUB_ACTOR = 'dependabot[bot]';
+    const result = await app.run();
+    assert.equal(result.exitCode, 1); assert.equal(result.setups, 0); assert.equal(result.processes, 0);
+    assert.equal(result.outputs['scan-status'], 'failed'); assert.equal(result.outputs['policy-status'], 'not-evaluated');
+    assert.equal(result.outputs['sarif-upload-ready'], 'false');
+    assert.match(result.logs, /::error::Scan could not complete\./);
+    assert.match(result.summary, /\*\*Scan could not complete\.\*\*/);
+    assert.match(result.summary, /Set CODEX_SECURITY_API_KEY in Actions secrets \(or Dependabot secrets for Dependabot runs\) and pass it as OPENAI_API_KEY/);
+    assert.doesNotMatch(result.logs, /Findings meet the configured failure threshold/);
+  });
+}
 
 test('cleanup failure fails the job and appears in the summary and final error', async (t) => {
   const app = await harness(t); app.configure({cleanupFails: true});

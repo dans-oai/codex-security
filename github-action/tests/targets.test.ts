@@ -19,7 +19,7 @@ async function fixture(t: any) {
     await writeFile(join(path,file),text); run('add','.'); run('commit','-m','change'); return run('rev-parse','HEAD');
   };
   const event = (head: string, eventName = 'pull_request'): EventContext => ({eventName, repository:'example/repo',
-    sha:head, ref:eventName === 'pull_request' ? 'refs/pull/7/merge' : 'refs/heads/main',serverUrl:'https://github.com',actor:'maintainer',
+    sha:head, ref:eventName === 'pull_request' ? 'refs/pull/7/merge' : 'refs/heads/main',serverUrl:'https://github.com',
     payload:{number:7,pull_request:{number:7,head:{sha:head,repo:{full_name:'example/repo'}},base:{sha:base,repo:{full_name:'example/repo'}}}}});
   const inputs = (values: Record<string,string>={scope:'diff'}) => parseInputs(key=>values[key]??'',path);
   return {path,run,base,change,event,inputs};
@@ -68,11 +68,10 @@ test('wrong checkout, local changes, missing diff base and option revisions are 
   const local=await resolveTarget(f.inputs({scope:'working-tree'}),f.event(head,'workflow_dispatch'));
   assert.equal(local.publishable,false); assert.equal(local.analysisRef,''); assert.equal(local.workingTreeBase,head);
 });
-test('forks, bot and privileged events fail eligibility',async t=>{
+test('forks and privileged events fail eligibility',async t=>{
   const f=await fixture(t); const event=f.event(f.base);
   event.payload.pull_request.head.repo.full_name='fork/repo'; assert.throws(()=>validateEvent(event),/Fork PR/);
   for(const eventName of ['pull_request_target','workflow_run']) assert.throws(()=>validateEvent({...event,eventName}),/Unsupported event/);
-  assert.throws(()=>validateEvent({...event,actor:'dependabot[bot]'}),/Dependabot/);
 });
 test('persisted Git credentials and origin userinfo are refused without revealing secrets',async t=>{
   const f=await fixture(t);
