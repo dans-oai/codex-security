@@ -147,6 +147,10 @@ runner supplies these prerequisites. Authentication uses `OPENAI_API_KEY`.
 Temporary runtime files are removed after the job; reports remain available to
 downstream steps.
 
+The Action uses the CLI’s validated JSON result for findings and scan status.
+If the CLI exits without a usable result, the Action reports failure and leaves
+report paths empty; it does not recover unvalidated partial files from disk.
+
 ## Troubleshooting
 
 - **Checkout or history errors:** use the triggering revision, `fetch-depth: 0`
@@ -168,14 +172,18 @@ npm --prefix github-action ci --ignore-scripts --no-audit --no-fund
 npm --prefix github-action run docs
 npm --prefix github-action run build
 npm --prefix github-action run validate
+# Test the published CLI with synthetic scans; no model calls:
+npm --prefix github-action/runtime ci --ignore-scripts --no-audit --no-fund
+npm --prefix github-action run test:cli
 # Linux x64 with Node 24; no model calls:
 node github-action/scripts/linux-smoke.mjs
 ```
 
 Commit source changes and the generated `dist/*.cjs` bundles together.
 Validation checks types, tests, Action metadata, documentation, and bundle
-reproducibility. CI also runs the packaged Linux smoke test and audits the Action
-and CLI dependency locks. The `@openai/codex-security` dependency in
+reproducibility. CI also tests the result adapter against the pinned CLI and its
+SARIF exporter using synthetic scans, runs the packaged Linux smoke test, and
+audits the Action and CLI dependency locks. The `@openai/codex-security` dependency in
 `runtime/package.json` is the CLI version source. To upgrade, update that exact
 pin and regenerate `runtime/package-lock.json`, rebuild the bundles, and run
 validation. Verify report compatibility when adopting a new release.

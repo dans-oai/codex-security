@@ -32,12 +32,6 @@ async function context(): Promise<EventContext> {
     sha: process.env.GITHUB_SHA ?? '', ref: process.env.GITHUB_REF ?? '', actor: process.env.GITHUB_ACTOR ?? '',
     serverUrl: process.env.GITHUB_SERVER_URL ?? '', payload: payload as Record<string, unknown>};
 }
-function costFromStdout(stdout: string): number | undefined {
-  try {
-    const value = JSON.parse(stdout)?.cost?.estimatedUsd;
-    return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
-  } catch { return undefined; }
-}
 function outputs(result: ScanResults, target: Target, exitCode: number): void {
   const values: Record<string, string | number | boolean> = {
     'sarif-path': result.paths.sarifPath, 'json-path': result.paths.jsonPath, 'coverage-path': result.paths.coveragePath,
@@ -123,7 +117,7 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
       try {
         execution = await deps.runProcess(runtime.nodePath, [runtime.cliPath, ...args], {
           cwd: target.repository, env: inputs.dryRun ? runtimeEnvironment(runtime) : runtime.env(apiKey),
-          timeoutMs: 6 * 60 * 60 * 1000, maxOutputBytes: 4 * 1024 * 1024, secrets,
+          timeoutMs: 6 * 60 * 60 * 1000, maxOutputBytes: 4 * 1024 * 1024, maxStdoutBytes: Infinity, secrets,
           // Stream bounded, sanitized stderr; structured stdout stays private.
           log: inputs.verbose ? core.info : undefined,
         });
@@ -141,23 +135,21 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
         finalSummary = 'Dry-run validated local CLI configuration without credentials. It did not verify authentication/model access, scan code, or evaluate findings. Use a separate configuration job, never the production required security check.';
         core.info(finalSummary);
       } else {
-        core.info('Validating the checkout, scan reports, and coverage.');
+        core.info('Checking the checkout and preparing CLI results for GitHub.');
         let checkoutError = '';
         try { await resolveTarget(inputs, event); }
         catch { checkoutError = 'The source checkout changed during scanning. Results cannot establish a completed scan of the requested revision.'; }
-        const resultOptions = {resultsDirectory: runtime.resultsDirectory,
+        const resultOptions = {stdout: execution.stdout, resultsDirectory: runtime.resultsDirectory,
           exitCode: interrupted || checkoutError ? 2 : execution.exitCode,
-          expected: {scope: inputs.scope, mode: inputs.mode, paths: inputs.paths, scannedSha: target.scannedSha,
-            diffBase: target.diffBase ?? target.workingTreeBase, diffHead: target.diffHead, publishable: target.publishable && !interrupted && !checkoutError},
-          failOnSeverity: inputs.failOnSeverity, estimatedCost: costFromStdout(execution.stdout)};
+          publishable: target.publishable && inputs.scope !== 'working-tree' && !interrupted && !checkoutError};
         let result = await analyzeResults(resultOptions);
-        if (result.canonicalValid && !result.paths.sarifPath && !interrupted && !checkoutError) {
+        if (result.paths.jsonPath && !result.paths.sarifPath && !interrupted && !checkoutError) {
           core.info('Producing a strict SARIF export from the validated scan.');
           const exported = await deps.runProcess(runtime.nodePath, [runtime.cliPath, ...exportSarifArgs(runtime.resultsDirectory, target.repository, join(runtime.resultsDirectory, 'exports/results.sarif')), '--python', runtime.pythonPath], {
             cwd: target.repository, env: runtimeEnvironment(runtime), timeoutMs: 60_000, secrets,
             log: inputs.verbose ? core.info : undefined,
           });
-          if (exported.exitCode === 0 && !exported.interrupted && !exported.timedOut) result = await analyzeResults(resultOptions);
+          if (exported.exitCode === 0 && !exported.interrupted && !exported.timedOut) result = await analyzeResults({...resultOptions, sarifExported: true});
         }
         if (checkoutError) result.errors.unshift(checkoutError);
         if (interrupted) result.errors.unshift('Scan was interrupted or exceeded its execution limit. Available findings are provisional.');

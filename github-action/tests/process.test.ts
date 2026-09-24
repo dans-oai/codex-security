@@ -105,3 +105,15 @@ test('AbortSignal stops a running child and paths must be absolute', async () =>
   assert.equal(result.interrupted, true);
   await assert.rejects(runProcess('node', [], { cwd: tmpdir(), env: {} }), /absolute/);
 });
+
+test('full structured stdout stays readable while diagnostic capture remains bounded', async () => {
+  const length = 4 * 1024 * 1024 + 1;
+  const result = await runProcess(process.execPath, ['-e', `
+    process.stdout.write(JSON.stringify({detail:'x'.repeat(${length})}));
+    process.stderr.write('diagnostic'.repeat(100));
+  `], {cwd: tmpdir(), env: {}, maxOutputBytes: 128, maxStdoutBytes: Infinity});
+  assert.equal(result.exitCode, 0);
+  assert.equal(JSON.parse(result.stdout).detail.length, length);
+  assert.equal(Buffer.byteLength(result.stderr), 128);
+  assert.equal(result.truncated, true); // Only diagnostics were truncated.
+});

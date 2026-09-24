@@ -8,6 +8,7 @@ export interface ProcessOptions {
   log?: (line: string) => void;
   timeoutMs?: number;
   maxOutputBytes?: number;
+  maxStdoutBytes?: number;
   secrets?: readonly string[];
   signal?: AbortSignal;
 }
@@ -39,8 +40,10 @@ export function safeLogLines(value: string, secrets: readonly string[] = []): st
 export async function runProcess(executable: string, args: readonly string[], options: ProcessOptions): Promise<ProcessResult> {
   if (!isAbsolute(executable) || !isAbsolute(options.cwd)) throw new Error('Process executable and working directory must be absolute paths.');
   const limit = options.maxOutputBytes ?? 1024 * 1024;
+  const stdoutLimit = options.maxStdoutBytes ?? limit;
   const timeout = options.timeoutMs ?? 60 * 60 * 1000;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 16 * 1024 * 1024) throw new Error('Invalid process output limit.');
+  if (stdoutLimit !== Infinity && (!Number.isSafeInteger(stdoutLimit) || stdoutLimit < 1)) throw new Error('Invalid stdout limit.');
   if (!Number.isSafeInteger(timeout) || timeout < 1) throw new Error('Invalid process timeout.');
   options.signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
@@ -87,7 +90,7 @@ export async function runProcess(executable: string, args: readonly string[], op
     process.once('SIGTERM', interrupt);
     options.signal?.addEventListener('abort', interrupt, { once: true });
     for (const name of ['stdout', 'stderr'] as const) child[name].on('data', (chunk: Buffer) => {
-      const remaining = limit - sizes[name];
+      const remaining = (name === 'stdout' ? stdoutLimit : limit) - sizes[name];
       if (remaining > 0) {
         const captured = chunk.subarray(0, remaining);
         buffers[name].push(captured);

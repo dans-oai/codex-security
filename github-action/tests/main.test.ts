@@ -4,7 +4,6 @@ import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/p
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import * as core from '@actions/core';
 import { runAction } from '../src/main.js';
 import { INPUT_NAMES } from '../src/inputs.js';
@@ -83,7 +82,9 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
   let setups = 0;
   let processes = 0;
   let cleanups = 0;
-  let executionExit = 0;
+  let executionExit: number | undefined;
+  let scanOutput = '';
+  let cliFailure = false;
   let incomplete = false;
   let omitSarif = false;
   let mutateCheckout = false;
@@ -123,19 +124,21 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
     }
     sarif.runs[0].versionControlProvenance[0].revisionId = sha;
     await writeFile(coveragePath, JSON.stringify(coverage));
-    manifest.scan.artifacts.find((entry: { path: string }) => entry.path === 'coverage.json').sha256 = createHash('sha256').update(JSON.stringify(coverage)).digest('hex');
     await writeFile(manifestPath, JSON.stringify(manifest));
     await writeFile(sarifPath, JSON.stringify(sarif));
     if (omitSarif) await rm(sarifPath);
+    scanOutput = JSON.stringify({manifest, coverage, findings: JSON.parse(await readFile(join(runtime.resultsDirectory, 'findings.json'), 'utf8')),
+      scanDir: runtime.resultsDirectory, sarifPath: omitSarif ? null : sarifPath, cost: {estimatedUsd: 0.125}});
   }
   return {
     repository, sha, base, git, runtime,
     setInput: (name: string, value: string) => { process.env[inputKey(name)] = value; },
-    configure: (options: { exitCode?: number; partial?: boolean; missingSarif?: boolean; mutateCheckout?: boolean; exportSucceeds?: boolean; cleanupFails?: boolean }) => {
+    configure: (options: { exitCode?: number; partial?: boolean; missingSarif?: boolean; mutateCheckout?: boolean; exportSucceeds?: boolean; cleanupFails?: boolean; cliFailure?: boolean }) => {
       executionExit = options.exitCode ?? executionExit; incomplete = options.partial ?? incomplete;
       omitSarif = options.missingSarif ?? omitSarif; mutateCheckout = options.mutateCheckout ?? mutateCheckout;
       exportSucceeds = options.exportSucceeds ?? exportSucceeds;
       cleanupFails = options.cleanupFails ?? cleanupFails;
+      cliFailure = options.cliFailure ?? cliFailure;
     },
     run: async () => {
       const logs: string[] = [];
@@ -157,8 +160,8 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
             options.log?.('[codex-security] Synthetic live CLI progress.');
             if (mutateCheckout) await writeFile(join(repository, 'app.txt'), 'modified while scanning\n');
             if (args[1] === 'export' && exportSucceeds) { omitSarif = false; await reports(); }
-            return { exitCode: args[1] === 'export' ? (exportSucceeds ? 0 : 2) : executionExit, signal: null,
-              stdout: JSON.stringify({ cost: { estimatedUsd: 0.125 } }), stderr: '', interrupted: false, timedOut: false, truncated: false };
+            return { exitCode: args[1] === 'export' ? (exportSucceeds ? 0 : 2) : executionExit ?? (process.env['INPUT_FAIL-ON-SEVERITY'] === 'high' ? 1 : 0), signal: null,
+              stdout: cliFailure ? JSON.stringify({status: 'failed', code: 'SCAN_FAILED', message: 'Synthetic API authentication failure.'}) : scanOutput, stderr: '', interrupted: false, timedOut: false, truncated: false };
           },
         });
         exitCode = process.exitCode;
@@ -347,4 +350,14 @@ test('working-tree results retain local reports without code-scanning upload', a
   const result = await app.run();
   assert.equal(result.exitCode, 0); assert.equal(result.outputs['scan-status'], 'completed');
   assert.equal(result.outputs['sarif-upload-ready'], 'false'); assert.equal(result.outputs['analysis-ref'], '');
+});
+
+test('CLI authentication failure is not reported as a findings threshold failure', async (t) => {
+  const app = await harness(t); app.configure({exitCode: 2, cliFailure: true});
+  const result = await app.run();
+  assert.equal(result.exitCode, 1); assert.equal(result.outputs['scan-status'], 'failed');
+  assert.equal(result.outputs['policy-status'], 'not-evaluated'); assert.equal(result.outputs['sarif-upload-ready'], 'false');
+  assert.equal(result.outputs['json-path'], '');
+  assert.match(result.summary, /Synthetic API authentication failure/);
+  assert.doesNotMatch(result.logs, /Findings meet the configured failure threshold/);
 });

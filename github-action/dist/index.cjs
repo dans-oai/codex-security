@@ -55525,8 +55525,10 @@ function safeLogLines(value, secrets = []) {
 async function runProcess(executable, args, options) {
   if (!(0, import_node_path.isAbsolute)(executable) || !(0, import_node_path.isAbsolute)(options.cwd)) throw new Error("Process executable and working directory must be absolute paths.");
   const limit = options.maxOutputBytes ?? 1024 * 1024;
+  const stdoutLimit = options.maxStdoutBytes ?? limit;
   const timeout = options.timeoutMs ?? 60 * 60 * 1e3;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 16 * 1024 * 1024) throw new Error("Invalid process output limit.");
+  if (stdoutLimit !== Infinity && (!Number.isSafeInteger(stdoutLimit) || stdoutLimit < 1)) throw new Error("Invalid stdout limit.");
   if (!Number.isSafeInteger(timeout) || timeout < 1) throw new Error("Invalid process timeout.");
   options.signal?.throwIfAborted();
   return new Promise((resolve6, reject) => {
@@ -55583,7 +55585,7 @@ async function runProcess(executable, args, options) {
     process.once("SIGTERM", interrupt);
     options.signal?.addEventListener("abort", interrupt, { once: true });
     for (const name of ["stdout", "stderr"]) child[name].on("data", (chunk) => {
-      const remaining = limit - sizes[name];
+      const remaining = (name === "stdout" ? stdoutLimit : limit) - sizes[name];
       if (remaining > 0) {
         const captured = chunk.subarray(0, remaining);
         buffers[name].push(captured);
@@ -55944,7 +55946,6 @@ async function cleanupRuntime(root, tempRoot) {
 // src/results.ts
 var import_node_fs2 = require("node:fs");
 var import_promises3 = require("node:fs/promises");
-var import_node_crypto = require("node:crypto");
 var import_node_path4 = require("node:path");
 
 // src/sarif.ts
@@ -55952,110 +55953,35 @@ function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function safeSourcePath(value) {
-  return typeof value === "string" && value.length > 0 && value.length <= 4096 && !/[\\\x00-\x1f\x7f]/u.test(value) && !value.startsWith("/") && !/^[a-z][a-z0-9+.-]*:/iu.test(value) && value.split("/").every((part) => part !== ".." && part !== "" && part !== ".");
+  return typeof value === "string" && value.length > 0 && !/[\\\x00-\x1f\x7f]/u.test(value) && !value.startsWith("/") && !/^[a-z][a-z0-9+.-]*:/iu.test(value) && value.split("/").every((part) => part !== ".." && part !== "" && part !== ".");
 }
 function exportSarifArgs(scanDirectory, sourceRoot, outputPath) {
   return ["export", scanDirectory, "--export-format", "sarif", "--source-root", sourceRoot, "--output", outputPath];
 }
-function validateSarif(value, scanId, findings, target) {
-  const errors = [];
-  const fail = (message) => {
-    if (errors.length < 20) errors.push(`SARIF: ${message}`);
-  };
-  if (!isRecord(value) || value.version !== "2.1.0" || !Array.isArray(value.runs) || value.runs.length !== 1) {
-    return ["SARIF: expected version 2.1.0 with exactly one CLI run."];
-  }
-  const run = value.runs[0];
-  if (!isRecord(run) || !isRecord(run.tool) || !isRecord(run.tool.driver) || run.tool.driver.name !== "Codex Security") {
-    return ["SARIF: expected Codex Security driver."];
-  }
-  if (!isRecord(run.automationDetails) || run.automationDetails.id !== scanId) fail("scan identity does not match the manifest.");
-  if (target && (!isRecord(run.properties) || run.properties.codexSecurityTargetKind !== target.kind)) fail("target kind differs from the canonical manifest.");
-  if (run.versionControlProvenance !== void 0 && (!Array.isArray(run.versionControlProvenance) || run.versionControlProvenance.length !== 1 || !isRecord(run.versionControlProvenance[0]) || target?.revision !== void 0 && run.versionControlProvenance[0].revisionId !== target.revision)) fail("revision provenance differs from the canonical manifest.");
-  if (run.externalPropertyFileReferences !== void 0 || run.originalUriBaseIds !== void 0) fail("external properties and URI bases are unsupported.");
-  const pending = [run];
-  let nodes = 0;
+function assertSafeSarif(value) {
+  const pending = [value];
   while (pending.length) {
     const item = pending.pop();
-    if (++nodes > 1e6) {
-      fail("structure exceeds the supported bound.");
-      break;
-    }
     if (Array.isArray(item)) {
       for (const child of item) pending.push(child);
     } else if (isRecord(item)) {
       for (const [key, child] of Object.entries(item)) {
-        if (key === "externalPropertyFileReferences" || key === "originalUriBaseIds") fail("external property references and URI bases are unsupported.");
+        if (key === "externalPropertyFileReferences" || key === "originalUriBaseIds")
+          throw new Error("External SARIF references are unsupported.");
         if (key === "artifactLocation") {
-          let decoded;
-          try {
-            decoded = isRecord(child) && typeof child.uri === "string" ? decodeURIComponent(child.uri) : void 0;
-          } catch {
-            decoded = void 0;
-          }
-          if (!isRecord(child) || child.uriBaseId !== void 0 || child.index !== void 0 || !safeSourcePath(decoded)) fail("unsafe artifact location.");
+          if (!isRecord(child) || typeof child.uri !== "string" || child.uriBaseId !== void 0 || child.index !== void 0 || !safeSourcePath(decodeURIComponent(child.uri))) throw new Error("Unsafe SARIF source location.");
         }
         if (typeof child === "object" && child !== null) pending.push(child);
       }
     }
   }
-  const rules = run.tool.driver.rules;
-  if (!Array.isArray(rules) || rules.length > 25e3 || !rules.every((rule) => isRecord(rule) && typeof rule.id === "string")) {
-    return [...errors, "SARIF: invalid rules."];
-  }
-  if (!Array.isArray(run.results) || run.results.length !== findings.length || run.results.length > 25e3) {
-    return [...errors, "SARIF: result count does not match canonical findings."];
-  }
-  const byOccurrence = new Map(findings.map((finding) => [finding.occurrenceId, finding]));
-  const seen = /* @__PURE__ */ new Set();
-  for (const result of run.results) {
-    if (!isRecord(result) || !isRecord(result.properties) || !isRecord(result.message) || typeof result.message.text !== "string") {
-      fail("invalid result shape.");
-      continue;
-    }
-    const occurrence = result.properties.occurrenceId;
-    const finding = typeof occurrence === "string" ? byOccurrence.get(occurrence) : void 0;
-    if (!finding || seen.has(finding.occurrenceId)) {
-      fail("unknown or duplicate finding identity.");
-      continue;
-    }
-    seen.add(finding.occurrenceId);
-    if (result.properties.findingId !== finding.id || result.ruleId !== finding.ruleId || result.properties.severity !== finding.severity || !isRecord(result.partialFingerprints) || result.partialFingerprints["codexSecurity/v1"] !== finding.fingerprint) fail("finding identity differs from canonical JSON.");
-    const index = result.ruleIndex;
-    if (typeof index !== "number" || !Number.isInteger(index) || index < 0 || !isRecord(rules[index]) || rules[index].id !== finding.ruleId) fail("invalid rule reference.");
-    if (!["error", "warning", "note", "none"].includes(String(result.level))) fail("invalid result level.");
-    if (!Array.isArray(result.locations) || result.locations.length < 1 || result.locations.length > 100) {
-      fail("invalid locations.");
-      continue;
-    }
-    for (const location of result.locations) {
-      if (!isRecord(location) || !isRecord(location.physicalLocation)) {
-        fail("invalid physical location.");
-        continue;
-      }
-      const physical = location.physicalLocation;
-      const artifact = physical.artifactLocation;
-      let decoded;
-      try {
-        decoded = isRecord(artifact) && typeof artifact.uri === "string" ? decodeURIComponent(artifact.uri) : void 0;
-      } catch {
-        decoded = void 0;
-      }
-      if (!isRecord(artifact) || artifact.uriBaseId !== void 0 || artifact.index !== void 0 || !safeSourcePath(decoded)) fail("source location must be a repository-relative path.");
-      const region = physical.region;
-      if (!isRecord(region) || !Number.isSafeInteger(region.startLine) || Number(region.startLine) < 1 || region.endLine !== void 0 && (!Number.isSafeInteger(region.endLine) || Number(region.endLine) < Number(region.startLine))) fail("invalid source line range.");
-    }
-  }
-  return errors;
 }
 
 // src/results.ts
-var MAX_REPORT_BYTES = 16 * 1024 * 1024;
 var REPORT_FILES = /* @__PURE__ */ new Set(["scan-manifest.json", "findings.json", "coverage.json", "exports/results.sarif"]);
 var LEVELS = ["informational", "low", "medium", "high", "critical"];
-async function readReportFile(root, name, maxBytes = MAX_REPORT_BYTES) {
+async function readReportFile(root, name) {
   if (!REPORT_FILES.has(name)) throw new Error("Unsupported report filename.");
-  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_REPORT_BYTES) throw new Error("Invalid report byte limit.");
   const absoluteRoot = (0, import_node_path4.resolve)(root);
   if (await (0, import_promises3.realpath)(absoluteRoot) !== absoluteRoot) throw new Error("Report root must be canonical and cannot contain symlinks.");
   const rootInfo = await (0, import_promises3.lstat)(absoluteRoot);
@@ -56069,96 +55995,18 @@ async function readReportFile(root, name, maxBytes = MAX_REPORT_BYTES) {
   }
   const path4 = (0, import_node_path4.join)(absoluteRoot, name);
   const before = await (0, import_promises3.lstat)(path4);
-  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1 || before.size > maxBytes) throw new Error("Report must be a bounded regular file without links.");
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) throw new Error("Report must be a regular file without links.");
   const file = await (0, import_promises3.open)(path4, import_node_fs2.constants.O_RDONLY | import_node_fs2.constants.O_NOFOLLOW | import_node_fs2.constants.O_NONBLOCK);
   try {
     const opened = await file.stat();
-    if (!opened.isFile() || opened.nlink !== 1 || opened.dev !== before.dev || opened.ino !== before.ino || opened.size > maxBytes) throw new Error("Report changed while opening.");
-    const bytes = Buffer.alloc(Math.min(opened.size + 1, maxBytes + 1));
-    let used = 0;
-    while (used < bytes.length) {
-      const { bytesRead } = await file.read(bytes, used, bytes.length - used, null);
-      if (bytesRead === 0) break;
-      used += bytesRead;
-    }
+    if (!opened.isFile() || opened.nlink !== 1 || opened.dev !== before.dev || opened.ino !== before.ino) throw new Error("Report changed while opening.");
+    const bytes = await file.readFile();
     const after = await file.stat();
-    if (used > opened.size || after.size !== opened.size || after.mtimeMs !== opened.mtimeMs || after.ctimeMs !== opened.ctimeMs || await (0, import_promises3.realpath)(path4) !== path4) throw new Error("Report changed while reading.");
-    return bytes.subarray(0, used);
+    if (bytes.length !== opened.size || after.size !== opened.size || after.mtimeMs !== opened.mtimeMs || after.ctimeMs !== opened.ctimeMs || await (0, import_promises3.realpath)(path4) !== path4) throw new Error("Report changed while reading.");
+    return bytes;
   } finally {
     await file.close();
   }
-}
-function document2(value, type) {
-  if (!isRecord(value) || value.documentType !== `codex-security.${type}` || value.schemaVersion !== "1.0") throw new Error(`Invalid ${type} document or schema version.`);
-  return value;
-}
-function strings(value) {
-  return Array.isArray(value) && value.length <= 25e3 && value.every((item) => typeof item === "string" && item.length <= 4096);
-}
-function samePaths(a, b) {
-  return strings(a) && strings(b) && JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
-}
-function requiredText(value) {
-  return typeof value === "string" && value.length > 0 && value.length <= 1e5;
-}
-function parseFindings(value) {
-  const doc = document2(value, "findings");
-  if (!requiredText(doc.scanId) || !Array.isArray(doc.findings) || doc.findings.length > 25e3) throw new Error("Invalid findings identity or count.");
-  const seen = /* @__PURE__ */ new Set();
-  const findings = doc.findings.map((item) => {
-    if (!isRecord(item) || typeof item.findingId !== "string" || !/^csf_[a-f0-9]{24}$/u.test(item.findingId) || typeof item.occurrenceId !== "string" || !/^occ_[a-f0-9]{24}$/u.test(item.occurrenceId) || seen.has(item.occurrenceId) || typeof item.ruleId !== "string" || !/^[a-z0-9][a-z0-9._/-]*$/u.test(item.ruleId) || !requiredText(item.title) || !requiredText(item.summary) || !isRecord(item.severity) || !LEVELS.includes(item.severity.level) || !isRecord(item.fingerprints) || item.fingerprints.algorithm !== "codex-security/v1" || typeof item.fingerprints.primary !== "string" || !/^codex-security\/v1:sha256:[a-f0-9]{64}$/u.test(item.fingerprints.primary) || !Array.isArray(item.locations) || item.locations.length < 1 || item.locations.length > 100) throw new Error("Invalid canonical finding fields.");
-    seen.add(item.occurrenceId);
-    for (const location of item.locations) {
-      if (!isRecord(location) || !safeSourcePath(location.path) || !Number.isSafeInteger(location.startLine) || Number(location.startLine) < 1 || location.endLine !== void 0 && (!Number.isSafeInteger(location.endLine) || Number(location.endLine) < Number(location.startLine))) throw new Error("Invalid canonical finding location.");
-    }
-    const primary = item.locations[0];
-    return {
-      id: item.findingId,
-      occurrenceId: item.occurrenceId,
-      ruleId: item.ruleId,
-      fingerprint: item.fingerprints.primary,
-      title: item.title,
-      summary: item.summary,
-      severity: item.severity.level,
-      path: primary.path,
-      startLine: primary.startLine,
-      endLine: primary.endLine ?? primary.startLine
-    };
-  });
-  return { scanId: doc.scanId, findings };
-}
-function validateCanonical(manifestValue, coverageValue, scanId, bytes, expected) {
-  const manifest = document2(manifestValue, "scan-manifest");
-  const coverage = document2(coverageValue, "coverage");
-  const scan = manifest.scan;
-  if (!isRecord(scan) || scan.id !== scanId || coverage.scanId !== scanId || !requiredText(scanId) || !["completed", "failed", "canceled", "interrupted"].includes(String(scan.status)) || !isRecord(scan.producer) || !requiredText(scan.producer.name) || !requiredText(scan.producer.version) || !["startedAt", "completedAt", "sealedAt"].every((field) => typeof scan[field] === "string" && Number.isFinite(Date.parse(scan[field])))) throw new Error("Invalid manifest identity, producer, status or seal.");
-  if (scan.findingsRef !== "findings.json" || scan.coverageRef !== "coverage.json" || !Array.isArray(scan.artifacts) || scan.artifacts.length > 1e5) throw new Error("Invalid canonical artifact references.");
-  for (const name of ["findings.json", "coverage.json"]) {
-    const entries = scan.artifacts.filter((entry2) => isRecord(entry2) && entry2.path === name);
-    const entry = entries[0];
-    if (entries.length !== 1 || !isRecord(entry) || entry.mediaType !== "application/json" || entry.sha256 !== (0, import_node_crypto.createHash)("sha256").update(bytes.get(name)).digest("hex")) throw new Error(`Canonical digest mismatch: ${name}.`);
-  }
-  const scope = scan.scope;
-  const paths = expected.paths.length ? expected.paths : ["."];
-  if (!isRecord(scope) || !samePaths(scope.includePaths, coverage.includePaths) || !samePaths(scope.excludePaths, coverage.excludePaths) || !samePaths(scope.includePaths, paths) || !samePaths(scope.excludePaths, [])) throw new Error("Reported scope does not match requested paths.");
-  const mode = expected.scope === "diff" ? "branch_diff" : expected.scope === "working-tree" ? "working_tree" : expected.paths.length ? "scoped_path" : expected.mode === "deep" ? "deep_repository" : "repository";
-  if (coverage.mode !== mode) throw new Error("Reported coverage mode does not match requested scope/mode.");
-  if (!["complete", "partial", "unknown"].includes(String(coverage.completeness)) || !["repository", "scoped_path", "diff", "directory", "custom"].includes(String(coverage.inventoryStrategy)) || !Array.isArray(coverage.surfaces) || !Array.isArray(coverage.deferred) || !Array.isArray(coverage.explicitExclusions)) throw new Error("Invalid coverage fields.");
-  if (!coverage.surfaces.every((surface) => isRecord(surface) && requiredText(surface.id) && requiredText(surface.label) && ["reported", "no_issue_found", "rejected", "not_applicable", "needs_follow_up"].includes(String(surface.disposition)) && strings(surface.receiptRefs))) throw new Error("Invalid coverage surface.");
-  if (coverage.completeness === "complete" && (coverage.deferred.length > 0 || coverage.surfaces.some((surface) => isRecord(surface) && surface.disposition === "needs_follow_up"))) throw new Error("Complete coverage contains deferred work.");
-  const target = scan.target;
-  if (!isRecord(target) || !requiredText(target.targetId) || !requiredText(target.displayName)) throw new Error("Invalid scan target.");
-  if (expected.scope === "repository") {
-    if (!["git_revision", "git_worktree"].includes(String(target.kind)) || target.revision !== expected.scannedSha) throw new Error("Reported target revision does not match the checkout.");
-  } else if (target.kind !== "git_diff" || target.baseRevision !== expected.diffBase || target.headRevision !== (expected.diffHead ?? expected.scannedSha) || !expected.diffBase) {
-    throw new Error("Reported diff revisions do not match the requested change set.");
-  }
-  if (target.kind !== "git_revision" && (typeof target.snapshotDigest !== "string" || !/^codex-security-snapshot\/v1:sha256:[a-f0-9]{64}$/u.test(target.snapshotDigest))) throw new Error("Missing or invalid snapshot identity.");
-  const incompleteReasons = [
-    ...coverage.deferred.flatMap((item) => isRecord(item) && typeof item.reason === "string" ? [`Deferred work: ${item.reason}`] : []),
-    ...coverage.surfaces.flatMap((surface) => isRecord(surface) && surface.disposition === "needs_follow_up" ? [`Needs follow-up: ${surface.label}`] : [])
-  ];
-  return { status: String(scan.status), completeness: String(coverage.completeness), targetKind: String(target.kind), incompleteReasons };
 }
 async function analyzeResults(options) {
   const result = {
@@ -56169,69 +56017,77 @@ async function analyzeResults(options) {
     counts: { critical: 0, high: 0, medium: 0, low: 0, informational: 0 },
     paths: { resultsDirectory: "", manifestPath: "", jsonPath: "", coveragePath: "", sarifPath: "" },
     errors: [],
-    sarifUploadReady: false,
-    canonicalValid: false,
-    scanId: ""
+    sarifUploadReady: false
   };
-  if (typeof options.estimatedCost === "number" && Number.isFinite(options.estimatedCost) && options.estimatedCost >= 0) result.estimatedCost = options.estimatedCost;
-  const bytes = /* @__PURE__ */ new Map();
-  const values = /* @__PURE__ */ new Map();
-  for (const name of ["scan-manifest.json", "findings.json", "coverage.json", "exports/results.sarif"]) {
+  let value;
+  try {
+    value = JSON.parse(options.stdout);
+    if (isRecord(value) && value.status === "failed" && typeof value.message === "string") {
+      result.errors.push(value.message);
+      return result;
+    }
+    if (!isRecord(value) || !isRecord(value.manifest) || !isRecord(value.manifest.scan) || !isRecord(value.manifest.scan.target) || !isRecord(value.findings) || !Array.isArray(value.findings.findings) || !isRecord(value.coverage) || !["complete", "partial", "unknown"].includes(String(value.coverage.completeness)))
+      throw new Error();
+  } catch {
+    result.errors.push("CLI did not return a usable JSON scan result. See the CLI diagnostics.");
+    return result;
+  }
+  if (value.scanDir !== options.resultsDirectory) {
+    result.errors.push("CLI report directory does not match the private output directory.");
+    return result;
+  }
+  try {
+    result.findings = value.findings.findings.map((finding) => {
+      if (!isRecord(finding) || typeof finding.title !== "string" || typeof finding.summary !== "string" || !isRecord(finding.severity) || !LEVELS.includes(finding.severity.level) || !Array.isArray(finding.locations))
+        throw new Error("CLI finding is missing fields needed for GitHub reporting.");
+      const location = finding.locations[0];
+      if (location && (!safeSourcePath(location.path) || !Number.isSafeInteger(location.startLine) || location.startLine < 1 || location.endLine !== void 0 && (!Number.isSafeInteger(location.endLine) || location.endLine < location.startLine)))
+        throw new Error("CLI finding has an unsafe source location for GitHub annotations.");
+      return {
+        title: finding.title,
+        summary: finding.summary,
+        severity: finding.severity.level,
+        path: location?.path,
+        startLine: location?.startLine,
+        endLine: location?.endLine ?? location?.startLine
+      };
+    });
+  } catch (error2) {
+    result.errors.push(error2.message);
+    return result;
+  }
+  for (const finding of result.findings) result.counts[finding.severity] += 1;
+  if (isRecord(value.cost) && typeof value.cost.estimatedUsd === "number" && Number.isFinite(value.cost.estimatedUsd) && value.cost.estimatedUsd >= 0)
+    result.estimatedCost = value.cost.estimatedUsd;
+  result.paths = {
+    resultsDirectory: options.resultsDirectory,
+    manifestPath: (0, import_node_path4.join)(options.resultsDirectory, "scan-manifest.json"),
+    jsonPath: (0, import_node_path4.join)(options.resultsDirectory, "findings.json"),
+    coveragePath: (0, import_node_path4.join)(options.resultsDirectory, "coverage.json"),
+    sarifPath: ""
+  };
+  if (value.coverage.completeness !== "complete") {
+    result.scanStatus = "incomplete";
+    for (const item of Array.isArray(value.coverage.deferred) ? value.coverage.deferred : []) if (typeof item?.reason === "string") result.errors.push(`Deferred work: ${item.reason}`);
+    for (const item of Array.isArray(value.coverage.surfaces) ? value.coverage.surfaces : []) if (item?.disposition === "needs_follow_up" && typeof item.label === "string")
+      result.errors.push(`Needs follow-up: ${item.label}`);
+  } else if (value.manifest.scan.status === "completed" && (options.exitCode === 0 || options.exitCode === 1)) {
+    result.scanStatus = "completed";
+    result.policyStatus = options.exitCode === 1 ? "failed" : "passed";
+  } else result.errors.push("CLI did not complete successfully. See the CLI diagnostics.");
+  for (const warning2 of Array.isArray(value.warnings) ? value.warnings : []) if (typeof warning2 === "string") result.errors.push(warning2);
+  const sarifPath = (0, import_node_path4.join)(options.resultsDirectory, "exports/results.sarif");
+  if (options.sarifExported || value.sarifPath != null) {
     try {
-      const data = await readReportFile(options.resultsDirectory, name);
-      bytes.set(name, data);
-      values.set(name, JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(data)));
+      if (!options.sarifExported && value.sarifPath !== sarifPath) throw new Error("SARIF path is outside the expected report location.");
+      assertSafeSarif(JSON.parse((await readReportFile(options.resultsDirectory, "exports/results.sarif")).toString("utf8")));
+      result.paths.sarifPath = sarifPath;
     } catch {
-      result.errors.push(`Missing, unsafe, oversized or invalid report: ${name}.`);
+      result.errors.push("SARIF report is missing, unsafe, or unreadable.");
     }
   }
-  try {
-    const parsed = parseFindings(values.get("findings.json"));
-    result.findings = parsed.findings;
-    result.scanId = parsed.scanId;
-    result.paths.jsonPath = (0, import_node_path4.join)(options.resultsDirectory, "findings.json");
-    result.paths.resultsDirectory = options.resultsDirectory;
-    for (const finding of result.findings) result.counts[finding.severity] += 1;
-  } catch (error2) {
-    result.errors.push(error2.message);
-  }
-  let canonical;
-  try {
-    if (!result.scanId) throw new Error("No validated findings identity.");
-    canonical = validateCanonical(values.get("scan-manifest.json"), values.get("coverage.json"), result.scanId, bytes, options.expected);
-    result.canonicalValid = true;
-    result.paths.manifestPath = (0, import_node_path4.join)(options.resultsDirectory, "scan-manifest.json");
-    result.paths.coveragePath = (0, import_node_path4.join)(options.resultsDirectory, "coverage.json");
-    if (canonical.completeness !== "complete") {
-      result.scanStatus = "incomplete";
-      result.errors.push(...canonical.incompleteReasons);
-    } else if (canonical.status === "completed" && (options.exitCode === 0 || options.exitCode === 1)) result.scanStatus = "completed";
-    else result.errors.push("Scanner did not exit successfully with a completed scan.");
-  } catch (error2) {
-    result.errors.push(error2.message);
-  }
-  if (result.scanStatus === "completed") {
-    const threshold = options.failOnSeverity;
-    const policyFailed = threshold !== "none" && result.findings.some((finding) => LEVELS.indexOf(finding.severity) >= LEVELS.indexOf(threshold));
-    result.policyStatus = policyFailed ? "failed" : "passed";
-    if (options.exitCode === 1 && !policyFailed) {
-      result.scanStatus = "failed";
-      result.policyStatus = "not-evaluated";
-      result.errors.push("CLI policy exit does not match the configured severity policy.");
-    }
-  }
-  if (values.has("exports/results.sarif") && result.scanId) {
-    const sarifErrors = validateSarif(
-      values.get("exports/results.sarif"),
-      result.scanId,
-      result.findings,
-      canonical ? { kind: canonical.targetKind, revision: options.expected.scannedSha } : void 0
-    );
-    result.errors.push(...sarifErrors);
-    if (!sarifErrors.length) result.paths.sarifPath = (0, import_node_path4.join)(options.resultsDirectory, "exports/results.sarif");
-  }
-  result.reportStatus = result.canonicalValid && result.paths.sarifPath ? "ready" : result.paths.jsonPath ? "partial" : "failed";
-  result.sarifUploadReady = result.scanStatus === "completed" && result.reportStatus === "ready" && options.expected.publishable && options.expected.scope !== "working-tree" && (options.expected.scope === "diff" || canonical?.targetKind === "git_revision");
+  result.reportStatus = result.paths.sarifPath ? "ready" : "partial";
+  result.sarifUploadReady = result.scanStatus === "completed" && result.reportStatus === "ready" && options.publishable && ["git_revision", "git_diff"].includes(String(value.manifest.scan.target.kind));
   return result;
 }
 
@@ -71477,7 +71333,7 @@ var AnonymousCredential = class extends Credential {
 };
 
 // node_modules/@azure/storage-common/dist/esm/credentials/StorageSharedKeyCredential.js
-var import_node_crypto2 = require("node:crypto");
+var import_node_crypto = require("node:crypto");
 
 // node_modules/@azure/storage-common/dist/esm/utils/constants.js
 var URLConstants = {
@@ -72178,7 +72034,7 @@ var StorageSharedKeyCredential = class extends Credential {
    * @param stringToSign -
    */
   computeHMACSHA256(stringToSign) {
-    return (0, import_node_crypto2.createHmac)("sha256", this.accountKey).update(stringToSign, "utf8").digest("base64");
+    return (0, import_node_crypto.createHmac)("sha256", this.accountKey).update(stringToSign, "utf8").digest("base64");
   }
 };
 
@@ -72544,7 +72400,7 @@ function storageRetryPolicy(options = {}) {
 }
 
 // node_modules/@azure/storage-common/dist/esm/policies/StorageSharedKeyCredentialPolicyV2.js
-var import_node_crypto3 = require("node:crypto");
+var import_node_crypto2 = require("node:crypto");
 var storageSharedKeyCredentialPolicyName = "storageSharedKeyCredentialPolicy";
 function storageSharedKeyCredentialPolicy(options) {
   function signRequest(request2) {
@@ -72566,7 +72422,7 @@ function storageSharedKeyCredentialPolicy(options) {
       getHeaderValueToSign(request2, HeaderConstants.IF_UNMODIFIED_SINCE),
       getHeaderValueToSign(request2, HeaderConstants.RANGE)
     ].join("\n") + "\n" + getCanonicalizedHeadersString(request2) + getCanonicalizedResourceString(request2);
-    const signature = (0, import_node_crypto3.createHmac)("sha256", options.accountKey).update(stringToSign, "utf8").digest("base64");
+    const signature = (0, import_node_crypto2.createHmac)("sha256", options.accountKey).update(stringToSign, "utf8").digest("base64");
     request2.headers.set(HeaderConstants.AUTHORIZATION, `SharedKey ${options.accountName}:${signature}`);
   }
   function getHeaderValueToSign(request2, headerName) {
@@ -72659,7 +72515,7 @@ function storageRequestFailureDetailsParserPolicy() {
 }
 
 // node_modules/@azure/storage-common/dist/esm/credentials/UserDelegationKeyCredential.js
-var import_node_crypto4 = require("node:crypto");
+var import_node_crypto3 = require("node:crypto");
 var UserDelegationKeyCredential = class {
   /**
    * Azure Storage account name; readonly.
@@ -72689,7 +72545,7 @@ var UserDelegationKeyCredential = class {
    * @param stringToSign -
    */
   computeHMACSHA256(stringToSign) {
-    return (0, import_node_crypto4.createHmac)("sha256", this.key).update(stringToSign, "utf8").digest("base64");
+    return (0, import_node_crypto3.createHmac)("sha256", this.key).update(stringToSign, "utf8").digest("base64");
   }
 };
 
@@ -99257,14 +99113,6 @@ async function context5() {
     payload
   };
 }
-function costFromStdout(stdout) {
-  try {
-    const value = JSON.parse(stdout)?.cost?.estimatedUsd;
-    return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : void 0;
-  } catch {
-    return void 0;
-  }
-}
 function outputs(result, target, exitCode) {
   const values = {
     "sarif-path": result.paths.sarifPath,
@@ -99362,6 +99210,7 @@ async function runAction(actionRoot, overrides = {}) {
           env: inputs.dryRun ? runtimeEnvironment(runtime) : runtime.env(apiKey),
           timeoutMs: 6 * 60 * 60 * 1e3,
           maxOutputBytes: 4 * 1024 * 1024,
+          maxStdoutBytes: Infinity,
           secrets,
           // Stream bounded, sanitized stderr; structured stdout stays private.
           log: inputs.verbose ? info : void 0
@@ -99382,7 +99231,7 @@ async function runAction(actionRoot, overrides = {}) {
         finalSummary = "Dry-run validated local CLI configuration without credentials. It did not verify authentication/model access, scan code, or evaluate findings. Use a separate configuration job, never the production required security check.";
         info(finalSummary);
       } else {
-        info("Validating the checkout, scan reports, and coverage.");
+        info("Checking the checkout and preparing CLI results for GitHub.");
         let checkoutError = "";
         try {
           await resolveTarget(inputs, event);
@@ -99390,22 +99239,13 @@ async function runAction(actionRoot, overrides = {}) {
           checkoutError = "The source checkout changed during scanning. Results cannot establish a completed scan of the requested revision.";
         }
         const resultOptions = {
+          stdout: execution.stdout,
           resultsDirectory: runtime.resultsDirectory,
           exitCode: interrupted || checkoutError ? 2 : execution.exitCode,
-          expected: {
-            scope: inputs.scope,
-            mode: inputs.mode,
-            paths: inputs.paths,
-            scannedSha: target.scannedSha,
-            diffBase: target.diffBase ?? target.workingTreeBase,
-            diffHead: target.diffHead,
-            publishable: target.publishable && !interrupted && !checkoutError
-          },
-          failOnSeverity: inputs.failOnSeverity,
-          estimatedCost: costFromStdout(execution.stdout)
+          publishable: target.publishable && inputs.scope !== "working-tree" && !interrupted && !checkoutError
         };
         let result = await analyzeResults(resultOptions);
-        if (result.canonicalValid && !result.paths.sarifPath && !interrupted && !checkoutError) {
+        if (result.paths.jsonPath && !result.paths.sarifPath && !interrupted && !checkoutError) {
           info("Producing a strict SARIF export from the validated scan.");
           const exported = await deps.runProcess(runtime.nodePath, [runtime.cliPath, ...exportSarifArgs(runtime.resultsDirectory, target.repository, (0, import_node_path6.join)(runtime.resultsDirectory, "exports/results.sarif")), "--python", runtime.pythonPath], {
             cwd: target.repository,
@@ -99414,7 +99254,7 @@ async function runAction(actionRoot, overrides = {}) {
             secrets,
             log: inputs.verbose ? info : void 0
           });
-          if (exported.exitCode === 0 && !exported.interrupted && !exported.timedOut) result = await analyzeResults(resultOptions);
+          if (exported.exitCode === 0 && !exported.interrupted && !exported.timedOut) result = await analyzeResults({ ...resultOptions, sarifExported: true });
         }
         if (checkoutError) result.errors.unshift(checkoutError);
         if (interrupted) result.errors.unshift("Scan was interrupted or exceeded its execution limit. Available findings are provisional.");
