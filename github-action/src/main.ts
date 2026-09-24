@@ -144,13 +144,18 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
           publishable: target.publishable && inputs.scope !== 'working-tree' && !interrupted && !checkoutError};
         let result = await analyzeResults(resultOptions);
         if (result.paths.jsonPath && !result.paths.sarifPath && !interrupted && !checkoutError) {
-          core.info('Producing a strict SARIF export from the validated scan.');
-          const exported = await deps.runProcess(runtime.nodePath, [runtime.cliPath, ...exportSarifArgs(runtime.resultsDirectory, target.repository, join(runtime.resultsDirectory, 'exports/results.sarif')), '--python', runtime.pythonPath], {
-            cwd: target.repository, env: runtimeEnvironment(runtime), timeoutMs: 60_000, secrets,
-            log: inputs.verbose ? core.info : undefined,
-          });
-          if (exported.exitCode === 0 && !exported.interrupted && !exported.timedOut) result = await analyzeResults({...resultOptions, sarifExported: true});
+          core.info('Producing a SARIF export from the validated scan.');
+          try {
+            const exported = await deps.runProcess(runtime.nodePath, [runtime.cliPath, ...exportSarifArgs(runtime.resultsDirectory, target.repository, join(runtime.resultsDirectory, 'exports/results.sarif')), '--python', runtime.pythonPath], {
+              cwd: target.repository, env: runtimeEnvironment(runtime), timeoutMs: 60_000, secrets,
+              log: inputs.verbose ? core.info : undefined,
+            });
+            if (exported.exitCode === 0 && !exported.interrupted && !exported.timedOut && !exported.signal)
+              result = await analyzeResults({...resultOptions, sarifExported: true});
+          } catch { log('SARIF export could not run; retaining the scan result.'); }
         }
+        if (result.paths.jsonPath && !result.paths.sarifPath)
+          core.warning('SARIF report is unavailable; scan results and other reports are still available.');
         if (checkoutError) result.errors.unshift(checkoutError);
         if (interrupted) result.errors.unshift('Scan was interrupted or exceeded its execution limit. Available findings are provisional.');
         try {
@@ -173,7 +178,7 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
         for (const error of result.errors.slice(0, 10)) log(`Report diagnostic: ${error}`);
         finalSummary = resultSummary(result, inputs, target, secrets);
         if (inputs.annotations) emitAnnotations(result, secrets);
-        success = result.scanStatus === 'completed' && result.policyStatus === 'passed' && result.reportStatus === 'ready';
+        success = result.scanStatus === 'completed' && result.policyStatus === 'passed' && result.reportStatus !== 'failed';
         finalTitle = resultTitle(result, inputs);
       }
     }

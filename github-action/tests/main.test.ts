@@ -2,9 +2,10 @@ import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import * as core from '@actions/core';
+import { DefaultArtifactClient } from '@actions/artifact';
 import { runAction } from '../src/main.js';
 import { INPUT_NAMES } from '../src/inputs.js';
 import { gitEnvironment } from '../src/targets.js';
@@ -89,6 +90,9 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
   let omitSarif = false;
   let mutateCheckout = false;
   let exportSucceeds = true;
+  let exportThrows = false;
+  let exportTimedOut = false;
+  let exportSignal: NodeJS.Signals | null = null;
   let cleanupFails = false;
   let summary = '';
   t.mock.method(core.summary, 'write', async () => {
@@ -133,10 +137,13 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
   return {
     repository, sha, base, git, runtime,
     setInput: (name: string, value: string) => { process.env[inputKey(name)] = value; },
-    configure: (options: { exitCode?: number; partial?: boolean; missingSarif?: boolean; mutateCheckout?: boolean; exportSucceeds?: boolean; cleanupFails?: boolean; cliFailure?: boolean }) => {
+    configure: (options: { exitCode?: number; partial?: boolean; missingSarif?: boolean; mutateCheckout?: boolean; exportSucceeds?: boolean; exportThrows?: boolean; exportTimedOut?: boolean; exportSignal?: NodeJS.Signals; cleanupFails?: boolean; cliFailure?: boolean }) => {
       executionExit = options.exitCode ?? executionExit; incomplete = options.partial ?? incomplete;
       omitSarif = options.missingSarif ?? omitSarif; mutateCheckout = options.mutateCheckout ?? mutateCheckout;
       exportSucceeds = options.exportSucceeds ?? exportSucceeds;
+      exportThrows = options.exportThrows ?? exportThrows;
+      exportTimedOut = options.exportTimedOut ?? exportTimedOut;
+      exportSignal = options.exportSignal ?? exportSignal;
       cleanupFails = options.cleanupFails ?? cleanupFails;
       cliFailure = options.cliFailure ?? cliFailure;
     },
@@ -159,9 +166,11 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
             processes++; capturedArgs = args; capturedEnvironment = options.env;
             options.log?.('[codex-security] Synthetic live CLI progress.');
             if (mutateCheckout) await writeFile(join(repository, 'app.txt'), 'modified while scanning\n');
-            if (args[1] === 'export' && exportSucceeds) { omitSarif = false; await reports(); }
-            return { exitCode: args[1] === 'export' ? (exportSucceeds ? 0 : 2) : executionExit ?? (process.env['INPUT_FAIL-ON-SEVERITY'] === 'high' ? 1 : 0), signal: null,
-              stdout: cliFailure ? JSON.stringify({status: 'failed', code: 'SCAN_FAILED', message: 'Synthetic API authentication failure.'}) : scanOutput, stderr: '', interrupted: false, timedOut: false, truncated: false };
+            const exporting = args[1] === 'export';
+            if (exporting && exportThrows) throw new Error('Synthetic exporter failure: synthetic-offline-test-key');
+            if (exporting && exportSucceeds) { omitSarif = false; await reports(); }
+            return { exitCode: exporting ? (exportSucceeds ? 0 : 2) : executionExit ?? (process.env['INPUT_FAIL-ON-SEVERITY'] === 'high' ? 1 : 0), signal: exporting ? exportSignal : null,
+              stdout: cliFailure ? JSON.stringify({status: 'failed', code: 'SCAN_FAILED', message: 'Synthetic API authentication failure.'}) : scanOutput, stderr: '', interrupted: false, timedOut: exporting && exportTimedOut, truncated: false };
           },
         });
         exitCode = process.exitCode;
@@ -283,7 +292,7 @@ test('configuration values in logs are redacted and cannot inject runner command
 });
 
 test('partial scan fails with provisional findings and no upload eligibility', async (t) => {
-  const app = await harness(t); app.configure({ exitCode: 2, partial: true }); app.setInput('verbose', 'false');
+  const app = await harness(t); app.configure({ exitCode: 2, partial: true, missingSarif: true, exportSucceeds: false }); app.setInput('verbose', 'false');
   const result = await app.run();
   assert.equal(result.exitCode, 1); assert.equal(result.outputs['scan-status'], 'incomplete');
   assert.equal(result.outputs['policy-status'], 'not-evaluated'); assert.equal(result.outputs['sarif-upload-ready'], 'false');
@@ -336,12 +345,71 @@ test('strict export repairs missing best-effort SARIF without model credentials'
   assert.equal(result.environment.OPENAI_API_KEY, undefined); assert.equal(result.outputs['sarif-upload-ready'], 'true');
 });
 
-test('failed strict export leaves a failed action with partial report', async (t) => {
-  const app = await harness(t); app.configure({ missingSarif: true, exportSucceeds: false }); const result = await app.run();
-  assert.equal(result.exitCode, 1); assert.equal(result.outputs['scan-status'], 'completed'); assert.equal(result.outputs['report-status'], 'partial');
-  assert.equal(result.outputs['sarif-upload-ready'], 'false');
+test('failed SARIF export preserves a successful scan and uploads the remaining reports', async (t) => {
+  const app = await harness(t); app.configure({ missingSarif: true, exportSucceeds: false });
+  app.setInput('annotations', 'true'); app.setInput('upload-artifacts', 'true');
+  let uploadedFiles: string[] = [];
+  t.mock.method(DefaultArtifactClient.prototype, 'uploadArtifact', async (_name: string, files: string[]) => {
+    uploadedFiles = files.map(file => basename(file));
+    for (const file of files) assert.ok((await readFile(file)).length);
+    return {id: 1, size: 1};
+  });
+  const result = await app.run();
+  assert.equal(result.exitCode, 0); assert.equal(result.processes, 2); assert.equal(result.cleanups, 1);
+  assert.equal(result.outputs['scan-status'], 'completed'); assert.equal(result.outputs['policy-status'], 'passed');
+  assert.equal(result.outputs['report-status'], 'partial'); assert.equal(result.outputs['sarif-upload-ready'], 'false');
+  assert.equal(result.outputs['sarif-path'], ''); assert.equal(result.outputs['high-count'], '1');
+  assert.ok(result.outputs['json-path']); assert.ok(result.outputs['coverage-path']); assert.ok(result.outputs['results-directory']);
+  assert.deepEqual(uploadedFiles.sort(), ['coverage.json', 'findings.json', 'scan-manifest.json']);
+  assert.match(result.logs, /::warning::SARIF report is unavailable; scan results and other reports are still available\./);
+  assert.match(result.logs, /^::warning .*file=src\/extract\.py/m);
+  assert.doesNotMatch(result.logs, /::error::/);
+  assert.match(result.summary, /\*\*Scan completed\. Findings are reported without failing the job\.\*\*/);
+  assert.match(result.summary, /SARIF report is unavailable/);
+});
+
+for (const failure of ['throw', 'timeout', 'signal'] as const) {
+  test(`SARIF export ${failure} preserves the completed scan`, async (t) => {
+    const app = await harness(t);
+    app.configure({missingSarif: true, exportThrows: failure === 'throw', exportTimedOut: failure === 'timeout',
+      exportSignal: failure === 'signal' ? 'SIGTERM' : undefined});
+    const result = await app.run();
+    assert.equal(result.exitCode, 0); assert.equal(result.outputs['scan-status'], 'completed');
+    assert.equal(result.outputs['policy-status'], 'passed'); assert.equal(result.outputs['report-status'], 'partial');
+    assert.equal(result.outputs['sarif-path'], ''); assert.equal(result.outputs['sarif-upload-ready'], 'false');
+    assert.ok(result.outputs['json-path']); assert.equal(result.cleanups, 1);
+    assert.match(result.logs, /::warning::SARIF report is unavailable/);
+    const logs = result.logs.split('\n').filter(line => !line.startsWith('::add-mask::')).join('\n');
+    assert.doesNotMatch(logs, /synthetic-offline-test-key/);
+    assert.doesNotMatch(result.summary, /synthetic-offline-test-key/);
+  });
+}
+
+test('missing SARIF does not mask a findings threshold failure', async (t) => {
+  const app = await harness(t); app.setInput('fail-on-severity', 'high');
+  app.configure({missingSarif: true, exportSucceeds: false});
+  const result = await app.run();
+  assert.equal(result.exitCode, 1); assert.equal(result.outputs['scan-status'], 'completed');
+  assert.equal(result.outputs['policy-status'], 'failed'); assert.equal(result.outputs['report-status'], 'partial');
+  assert.equal(result.outputs['sarif-upload-ready'], 'false'); assert.equal(result.outputs['high-count'], '1');
+  assert.match(result.logs, /::error::Scan completed\. Findings meet the configured failure threshold\./);
+  assert.match(result.summary, /\*\*Scan completed\. Findings meet the configured failure threshold\.\*\*/);
+});
+
+test('requested artifact upload failure remains fatal without SARIF', async (t) => {
+  const app = await harness(t); app.configure({missingSarif: true, exportSucceeds: false});
+  app.setInput('upload-artifacts', 'true');
+  const upload = t.mock.method(DefaultArtifactClient.prototype, 'uploadArtifact', async () => {
+    throw new Error('Synthetic artifact upload failure');
+  });
+  const result = await app.run();
+  assert.equal(upload.mock.callCount(), 1); assert.equal(result.exitCode, 1);
+  assert.equal(result.outputs['scan-status'], 'completed'); assert.equal(result.outputs['policy-status'], 'passed');
+  assert.equal(result.outputs['report-status'], 'failed'); assert.equal(result.outputs['sarif-upload-ready'], 'false');
+  assert.equal(result.outputs['json-path'], ''); assert.equal(result.outputs['coverage-path'], '');
+  assert.equal(result.outputs['results-directory'], ''); assert.equal(result.outputs['sarif-path'], '');
   assert.match(result.logs, /::error::Scan completed, but required reporting failed\./);
-  assert.match(result.summary, /\*\*Scan completed, but required reporting failed\.\*\*/);
+  assert.match(result.summary, /Synthetic artifact upload failure/);
 });
 
 test('working-tree results retain local reports without code-scanning upload', async (t) => {

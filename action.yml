@@ -89,7 +89,7 @@ outputs:
   policy-status:
     description: 'passed, failed, or not-evaluated. Incomplete scans never pass the policy.'
   report-status:
-    description: 'ready, partial, or failed. Reporting failure fails the action.'
+    description: 'ready, partial, or failed. Missing optional SARIF yields partial without failing the scan; required reporting failures yield failed.'
   exit-code:
     description: CLI exit code, or empty if the CLI was not started.
   scanned-sha:

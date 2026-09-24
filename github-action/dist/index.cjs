@@ -99030,7 +99030,7 @@ function html(value) {
 }
 function resultTitle(result, inputs) {
   if (result.scanStatus !== "completed") return "Scan could not complete. Available findings are provisional.";
-  if (result.reportStatus !== "ready") return "Scan completed, but required reporting failed.";
+  if (result.reportStatus === "failed") return "Scan completed, but required reporting failed.";
   if (result.policyStatus === "failed") return "Scan completed. Findings meet the configured failure threshold.";
   if (inputs.failOnSeverity === "none") return "Scan completed. Findings are reported without failing the job.";
   return "Scan completed. No findings meet the failure threshold.";
@@ -99048,6 +99048,7 @@ function resultSummary(result, inputs, target, secrets = []) {
     ...inputs.maxCost !== void 0 ? [`**Stop threshold:** $${inputs.maxCost} (estimated; in-flight requests can exceed it)`] : [],
     "Applicable root and nested SECURITY.md policy is discovered by the scanner."
   ];
+  if (result.reportStatus === "partial") parts.push("SARIF report is unavailable; scan results and other reports are still available.");
   if (result.scanStatus !== "completed") parts.push("**Findings below are provisional. This is not a completed scan.**");
   for (const error2 of result.errors.slice(0, 10)) parts.push(`<pre>${esc(error2)}</pre>`);
   for (const finding of result.findings.slice(0, 30)) {
@@ -99246,16 +99247,23 @@ async function runAction(actionRoot, overrides = {}) {
         };
         let result = await analyzeResults(resultOptions);
         if (result.paths.jsonPath && !result.paths.sarifPath && !interrupted && !checkoutError) {
-          info("Producing a strict SARIF export from the validated scan.");
-          const exported = await deps.runProcess(runtime.nodePath, [runtime.cliPath, ...exportSarifArgs(runtime.resultsDirectory, target.repository, (0, import_node_path6.join)(runtime.resultsDirectory, "exports/results.sarif")), "--python", runtime.pythonPath], {
-            cwd: target.repository,
-            env: runtimeEnvironment(runtime),
-            timeoutMs: 6e4,
-            secrets,
-            log: inputs.verbose ? info : void 0
-          });
-          if (exported.exitCode === 0 && !exported.interrupted && !exported.timedOut) result = await analyzeResults({ ...resultOptions, sarifExported: true });
+          info("Producing a SARIF export from the validated scan.");
+          try {
+            const exported = await deps.runProcess(runtime.nodePath, [runtime.cliPath, ...exportSarifArgs(runtime.resultsDirectory, target.repository, (0, import_node_path6.join)(runtime.resultsDirectory, "exports/results.sarif")), "--python", runtime.pythonPath], {
+              cwd: target.repository,
+              env: runtimeEnvironment(runtime),
+              timeoutMs: 6e4,
+              secrets,
+              log: inputs.verbose ? info : void 0
+            });
+            if (exported.exitCode === 0 && !exported.interrupted && !exported.timedOut && !exported.signal)
+              result = await analyzeResults({ ...resultOptions, sarifExported: true });
+          } catch {
+            log2("SARIF export could not run; retaining the scan result.");
+          }
         }
+        if (result.paths.jsonPath && !result.paths.sarifPath)
+          warning("SARIF report is unavailable; scan results and other reports are still available.");
         if (checkoutError) result.errors.unshift(checkoutError);
         if (interrupted) result.errors.unshift("Scan was interrupted or exceeded its execution limit. Available findings are provisional.");
         try {
@@ -99277,7 +99285,7 @@ async function runAction(actionRoot, overrides = {}) {
         for (const error2 of result.errors.slice(0, 10)) log2(`Report diagnostic: ${error2}`);
         finalSummary = resultSummary(result, inputs, target, secrets);
         if (inputs.annotations) emitAnnotations(result, secrets);
-        success = result.scanStatus === "completed" && result.policyStatus === "passed" && result.reportStatus === "ready";
+        success = result.scanStatus === "completed" && result.policyStatus === "passed" && result.reportStatus !== "failed";
         finalTitle = resultTitle(result, inputs);
       }
     }

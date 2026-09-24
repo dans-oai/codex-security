@@ -116,6 +116,11 @@ distinguish findings above the failure threshold from a scan that could not
 complete or a required reporting failure. With `fail-on-severity: none`, findings
 are report-only; scanner and required reporting failures still fail the job.
 
+SARIF is optional. If it cannot be produced, the Action warns and sets
+`report-status: partial` and `sarif-upload-ready: false`. Summaries, annotations,
+and JSON reports remain available, and the scan outcome is preserved. A requested
+artifact upload that fails still fails the job.
+
 ### GitHub code scanning
 
 Grant the job `security-events: write` and, for private repositories,
@@ -238,7 +243,7 @@ All outputs are strings. An empty cost or count means unavailable, not zero.
 | `scan-status` | completed, incomplete, failed, or skipped. Skipped is reserved for empty diffs or dry-run. |
 | `skip-reason` | empty-diff or dry-run when no scan ran; otherwise empty. |
 | `policy-status` | passed, failed, or not-evaluated. Incomplete scans never pass the policy. |
-| `report-status` | ready, partial, or failed. Reporting failure fails the action. |
+| `report-status` | ready, partial, or failed. Missing optional SARIF yields partial without failing the scan; required reporting failures yield failed. |
 | `exit-code` | CLI exit code, or empty if the CLI was not started. |
 | `scanned-sha` | Verified checkout commit SHA. Working-tree contents are not represented by this SHA alone. |
 | `analysis-ref` | GitHub ref matching the scanned revision. Empty for working-tree scans. |

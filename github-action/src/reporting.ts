@@ -15,7 +15,7 @@ function html(value: string): string {
 }
 export function resultTitle(result: ScanResults, inputs: Inputs): string {
   if (result.scanStatus !== 'completed') return 'Scan could not complete. Available findings are provisional.';
-  if (result.reportStatus !== 'ready') return 'Scan completed, but required reporting failed.';
+  if (result.reportStatus === 'failed') return 'Scan completed, but required reporting failed.';
   if (result.policyStatus === 'failed') return 'Scan completed. Findings meet the configured failure threshold.';
   if (inputs.failOnSeverity === 'none') return 'Scan completed. Findings are reported without failing the job.';
   return 'Scan completed. No findings meet the failure threshold.';
@@ -33,6 +33,7 @@ export function resultSummary(result: ScanResults, inputs: Inputs, target: Targe
     ...(inputs.maxCost !== undefined ? [`**Stop threshold:** $${inputs.maxCost} (estimated; in-flight requests can exceed it)`] : []),
     'Applicable root and nested SECURITY.md policy is discovered by the scanner.',
   ];
+  if (result.reportStatus === 'partial') parts.push('SARIF report is unavailable; scan results and other reports are still available.');
   if (result.scanStatus !== 'completed') parts.push('**Findings below are provisional. This is not a completed scan.**');
   for (const error of result.errors.slice(0, 10)) parts.push(`<pre>${esc(error)}</pre>`);
   for (const finding of result.findings.slice(0, 30)) {
