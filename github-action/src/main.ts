@@ -1,7 +1,7 @@
 import * as core from '@actions/core';
 import { readFile, lstat, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
-import { INPUT_NAMES, parseInputs, scanArguments, type Inputs } from './inputs.js';
+import { parseInputs, scanArguments, type Inputs } from './inputs.js';
 import { resolveTarget, validateEvent, type EventContext, type Target } from './targets.js';
 import { SUPPORTED_CLI_VERSION, setupRuntime, cleanupRuntime, runtimeEnvironment, type Runtime } from './runtime.js';
 import { runProcess, safeLogLines } from './process.js';
@@ -72,10 +72,6 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
     const apiKey = process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY || '';
     secrets = [apiKey].filter(Boolean);
     for (const secret of secrets) core.setSecret(secret);
-    const knownInputs = new Set(INPUT_NAMES.map(name => `INPUT_${name.toUpperCase()}`));
-    for (const key of Object.keys(process.env)) {
-      if (key.startsWith('INPUT_') && !knownInputs.has(key)) throw new Error(`Unknown action input: ${key.slice(6).toLowerCase()}. See the input reference; unsupported inputs are never silently ignored.`);
-    }
     inputs = parseInputs(name => core.getInput(name), process.env.GITHUB_WORKSPACE ?? '');
     const event = await context();
     validateEvent(event);

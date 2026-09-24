@@ -55330,36 +55330,6 @@ var import_promises8 = require("node:fs/promises");
 var import_node_path6 = require("node:path");
 
 // src/inputs.ts
-var INPUT_NAMES = [
-  "repository",
-  "scope",
-  "paths",
-  "diff-base",
-  "diff-head",
-  "working-tree-base",
-  "mode",
-  "model",
-  "effort",
-  "max-cost",
-  "fail-on-severity",
-  "knowledge-base",
-  "scan-prompt-file",
-  "validation-prompt-file",
-  "workers",
-  "subagents",
-  "stop-after-no-new",
-  "max-discovery-runs",
-  "max-time-hours",
-  "codex-config",
-  "safety-identifier",
-  "verbose",
-  "dry-run",
-  "summary",
-  "annotations",
-  "upload-artifacts",
-  "artifact-name",
-  "retention-days"
-];
 function parseInputs(read, workspace) {
   const str = (name, fallback = "") => {
     const value = read(name).trim() || fallback;
@@ -99158,10 +99128,6 @@ async function runAction(actionRoot, overrides = {}) {
     const apiKey = process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY || "";
     secrets = [apiKey].filter(Boolean);
     for (const secret of secrets) setSecret(secret);
-    const knownInputs = new Set(INPUT_NAMES.map((name) => `INPUT_${name.toUpperCase()}`));
-    for (const key of Object.keys(process.env)) {
-      if (key.startsWith("INPUT_") && !knownInputs.has(key)) throw new Error(`Unknown action input: ${key.slice(6).toLowerCase()}. See the input reference; unsupported inputs are never silently ignored.`);
-    }
     inputs = parseInputs((name) => getInput(name), process.env.GITHUB_WORKSPACE ?? "");
     const event = await context5();
     validateEvent(event);

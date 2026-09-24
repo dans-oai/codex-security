@@ -223,6 +223,14 @@ test('scheduled complete report-only scan succeeds', async (t) => {
   assert.match(result.summary, /\*\*Scan completed\. Findings are reported without failing the job\.\*\*/);
 });
 
+test('unrelated ambient input variables do not reject a valid scan', async (t) => {
+  const app = await harness(t); process.env.INPUT_FOO = 'unrelated workflow value';
+  app.setInput('effort', 'medium');
+  const result = await app.run();
+  assert.equal(result.exitCode, 0); assert.equal(result.outputs['scan-status'], 'completed');
+  assert.equal(result.args[result.args.indexOf('--effort') + 1], 'medium');
+});
+
 test('findings below the threshold pass with an explicit outcome', async (t) => {
   const app = await harness(t); app.setInput('fail-on-severity', 'critical');
   const result = await app.run();
