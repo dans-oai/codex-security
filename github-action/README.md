@@ -105,7 +105,7 @@ including policy changes in the PR. Review those changes alongside the code.
 
 ## Scan settings
 
-The Action runs standard scans of a repository, selected paths, or committed changes.
+The Action defaults to `mode: standard` for repository, selected-path, and diff scans.
 Keep unrelated credentials and deployment steps in separate jobs.
 
 - Set `paths` to newline-separated files or folders to scan part of a repository.
@@ -113,6 +113,20 @@ Keep unrelated credentials and deployment steps in separate jobs.
 - For diff scans outside PR events, set `diff-base`.
 - Set `dry-run: 'true'` to check configuration without an API key or model calls.
   Use a separate setup job; dry-run does not assess code or verify model access.
+
+For a Deep scan of a repository or selected paths, add these inputs to the scan step:
+
+```yaml
+with:
+  mode: deep
+  max-time-hours: '2'
+```
+
+Deep mode does not support diff scans. `max-time-hours` limits Deep discovery;
+finalization can take additional time. It is unset by default, which uses the
+CLI's default of 96 hours. Set an explicit budget for Deep scans that leaves
+room for finalization within your job timeout and the Action's six-hour scan
+limit.
 
 ## Reports
 
@@ -216,9 +230,11 @@ Inputs are strings. Quote booleans and use newline-separated literal paths for l
 | `scope` | `repository` | repository or diff. Select diff for PR changes only; repository scans the full checkout. |
 | `paths` | Unset | Newline-delimited literal repository-relative files or folders. Only for repository scope; no globs. |
 | `diff-base` | Unset | Diff base revision. Defaults to the PR merge base; required outside PRs when scope is diff. |
+| `mode` | `standard` | standard or deep. Deep supports repository scans, including selected paths; not diff scans. |
 | `model` | `gpt-5.6-sol` | Model with access through your API key. Cost limits require CLI pricing support for the model. |
 | `effort` | `xhigh` | Reasoning effort: minimal, low, medium, high, xhigh, or max (subject to model support). |
 | `max-cost` | Unset | Positive estimated USD stop threshold per invocation. In-flight requests can exceed it; unset means no cost limit. |
+| `max-time-hours` | Unset | Positive Deep discovery duration in hours, up to 96. Unset uses the CLI default. Finalization and job timeout are separate. |
 | `fail-on-severity` | `none` | none, low, medium, high, or critical. Scanner/coverage/report failures fail independently. |
 | `verbose` | `true` | Stream bounded, credential-redacted CLI diagnostics to the job log. Set false for lifecycle and elapsed-time messages only. |
 | `dry-run` | `false` | Validate local configuration without a scan or API key. Does not verify authentication or model access. Use a separate non-required job. |

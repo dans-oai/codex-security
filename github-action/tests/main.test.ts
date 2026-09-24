@@ -118,6 +118,7 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
       coverage.mode = 'branch_diff';
       sarif.runs[0].properties.codexSecurityTargetKind = 'git_diff';
     }
+    if (process.env.INPUT_MODE === 'deep') coverage.mode = 'deep_repository';
     if (incomplete) {
       coverage.completeness = 'partial';
       coverage.deferred = [{id: 'unreviewed-route', reason: 'Dependency <example> unavailable; validation deferred.'}];
@@ -224,6 +225,22 @@ test('unrelated ambient input variables do not reject a valid scan', async (t) =
   const result = await app.run();
   assert.equal(result.exitCode, 0); assert.equal(result.outputs['scan-status'], 'completed');
   assert.equal(result.args[result.args.indexOf('--effort') + 1], 'medium');
+});
+
+test('Deep scans forward their budget and publish completed reports with cleanup', async (t) => {
+  const app = await harness(t);
+  app.setInput('mode', 'deep'); app.setInput('max-time-hours', '1.5');
+  const result = await app.run();
+  assert.equal(result.args[result.args.indexOf('--mode') + 1], 'deep');
+  assert.equal(result.args[result.args.indexOf('--max-time-hours') + 1], '1.5');
+  assert.equal(result.exitCode, 0); assert.equal(result.cleanups, 1);
+  assert.equal(result.outputs['scan-status'], 'completed');
+  assert.equal(result.outputs['policy-status'], 'passed');
+  assert.equal(result.outputs['report-status'], 'ready');
+  assert.equal(result.outputs['high-count'], '1');
+  assert.equal(result.outputs['sarif-upload-ready'], 'true');
+  assert.match(result.logs, /mode: deep/);
+  assert.match(result.summary, /\*\*Mode:\*\* deep/);
 });
 
 test('findings below the threshold pass with an explicit outcome', async (t) => {

@@ -4,7 +4,9 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { parseInputs, scanArguments } from '../src/inputs.js';
 import { analyzeResults } from '../src/results.js';
+import { resolveTool } from '../src/runtime.js';
 import { exportSarifArgs } from '../src/sarif.js';
 import runtimeManifest from '../runtime/package.json' with { type: 'json' };
 
@@ -63,6 +65,16 @@ try {
     assert.equal(result.estimatedCost, cliResult.cost?.estimatedUsd);
   }
 
+  // Deep Scan cannot use --mock; validate the Action's actual arguments without model calls.
+  const deepInputs: Record<string, string> = {mode: 'deep', 'max-time-hours': '0.25', paths: 'example.ts', 'dry-run': 'true'};
+  const deepArguments = scanArguments(parseInputs(name => deepInputs[name] ?? '', repository),
+    {repository}, join(root, 'deep-results'), await resolveTool('python3'));
+  const deepPreflight = JSON.parse(run(deepArguments, 0));
+  assert.equal(deepPreflight.dryRun, true);
+  assert.equal(deepPreflight.mode, 'deep');
+  assert.equal(deepPreflight.maxTimeHours, 0.25);
+  assert.deepEqual(deepPreflight.target.paths, ['example.ts']);
+
   // The CLI owns scan validation: an output directory inside the source checkout is forbidden.
   const resultsDirectory = join(repository, 'results');
   const stdout = run(['scan', repository, '--mock', '--format', 'json', '--output-dir', resultsDirectory], 2);
@@ -73,7 +85,7 @@ try {
   assert.equal(result.policyStatus, 'not-evaluated');
   assert.equal(result.sarifUploadReady, false);
   assert.ok(result.errors.some(error => error.includes(cliError.message)));
-  console.log(`Pinned CLI ${installed.version}: real JSON results, severity exits, SARIF export, and failures passed without model calls.`);
+  console.log(`Pinned CLI ${installed.version}: real JSON results, severity exits, SARIF export, Deep Scan preflight, and failures passed without model calls.`);
 } finally {
   await rm(root, { recursive: true, force: true });
 }

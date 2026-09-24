@@ -90,7 +90,7 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
       if (!inputs.dryRun && (!apiKey || /[\r\n\u0000]/.test(apiKey))) throw new Error('Set CODEX_SECURITY_API_KEY in Actions secrets (or Dependabot secrets for Dependabot runs) and pass it as OPENAI_API_KEY to this step. No scan was started.');
       tempRoot = await realpath(process.env.RUNNER_TEMP ?? '');
       if (!process.env.RUNNER_TEMP) throw new Error('RUNNER_TEMP is required.');
-      core.info(`Preparing Codex Security ${SUPPORTED_CLI_VERSION}. Scope: ${inputs.scope}; effort: ${inputs.effort}.`);
+      core.info(`Preparing Codex Security ${SUPPORTED_CLI_VERSION}. Scope: ${inputs.scope}; mode: ${inputs.mode}; effort: ${inputs.effort}.`);
       const preparationStarted = performance.now();
       let timer = heartbeat('CLI preparation', preparationStarted);
       try { runtime = await deps.setupRuntime({actionRoot, tempRoot, log: core.info}); }

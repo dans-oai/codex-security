@@ -6,14 +6,39 @@ const parse = (values: Record<string, string> = {}) => parseInputs(key => values
 test('defaults are stable across events', () => {
   const input = parse();
   assert.deepEqual(input, {
-    repository: '/checkout', scope: 'repository', paths: [], diffBase: undefined,
-    model: 'gpt-5.6-sol', effort: 'xhigh', maxCost: undefined, failOnSeverity: 'none',
+    repository: '/checkout', scope: 'repository', paths: [], diffBase: undefined, mode: 'standard',
+    model: 'gpt-5.6-sol', effort: 'xhigh', maxCost: undefined, maxTimeHours: undefined, failOnSeverity: 'none',
     verbose: true, dryRun: false, summary: true, annotations: true,
     uploadArtifacts: false, artifactName: 'codex-security', retentionDays: 7,
   });
   const args = scanArguments(input, {repository:'/checkout'}, '/results', '/usr/bin/python3');
   assert.equal(args[args.indexOf('--mode') + 1], 'standard');
+  assert.ok(!args.includes('--max-time-hours'));
   assert.ok(!args.includes('--fail-on-severity'));
+});
+test('Deep scans forward an explicit discovery budget and selected repository paths', () => {
+  const input = parse({mode:'deep', paths:'./src/\nlib', 'max-time-hours':'1.5'});
+  assert.equal(input.mode, 'deep');
+  assert.equal(input.maxTimeHours, 1.5);
+  const args = scanArguments(input, {repository:'/checkout'}, '/results', '/usr/bin/python3');
+  assert.equal(args[args.indexOf('--mode') + 1], 'deep');
+  assert.equal(args[args.indexOf('--max-time-hours') + 1], '1.5');
+  assert.deepEqual(args.flatMap((arg, index) => arg === '--path' ? [args[index + 1]] : []), ['src', 'lib']);
+});
+test('Deep scans leave an unset discovery budget to the CLI', () => {
+  const input = parse({mode:'deep'});
+  assert.equal(input.maxTimeHours, undefined);
+  const args = scanArguments(input, {repository:'/checkout'}, '/results', '/usr/bin/python3');
+  assert.equal(args[args.indexOf('--mode') + 1], 'deep');
+  assert.ok(!args.includes('--max-time-hours'));
+});
+test('Deep scan mode and discovery budgets reject unsupported combinations', () => {
+  assert.throws(() => parse({mode:'thorough'}), /mode must be one of: standard, deep/);
+  assert.throws(() => parse({mode:'deep', scope:'diff'}), /mode: deep requires scope: repository/);
+  assert.throws(() => parse({'max-time-hours':'1'}), /max-time-hours requires mode: deep/);
+  for (const value of ['NaN', 'Infinity', '-1', '0', '96.1'])
+    assert.throws(() => parse({mode:'deep', 'max-time-hours':value}), /max-time-hours/);
+  assert.equal(parse({mode:'deep', 'max-time-hours':'96'}).maxTimeHours, 96);
 });
 test('verbose diagnostics default on and can be explicitly disabled', () => {
   const args = (values: Record<string, string>) => scanArguments(parse(values), {repository:'/checkout'}, '/results', '/usr/bin/python3');

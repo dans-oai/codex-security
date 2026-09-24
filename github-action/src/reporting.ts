@@ -26,7 +26,7 @@ export function resultSummary(result: ScanResults, inputs: Inputs, target: Targe
   const parts = [
     `**Scan:** ${result.scanStatus} · **Findings policy:** ${result.policyStatus} · **Report:** ${result.reportStatus}`,
     `**Findings:** ${counts}`,
-    `**Scope:** ${inputs.scope}${inputs.paths.length ? ` <code>${esc(inputs.paths.join(', '))}</code>` : ''}`,
+    `**Scope:** ${inputs.scope}${inputs.paths.length ? ` <code>${esc(inputs.paths.join(', '))}</code>` : ''} · **Mode:** ${inputs.mode}`,
     `**Commit:** <code>${target.scannedSha}</code>`,
     `**Model:** <code>${esc(inputs.model)}</code> · **Reasoning effort:** ${inputs.effort}`,
     `**Failure threshold:** ${inputs.failOnSeverity === 'none' ? 'report-only findings' : inputs.failOnSeverity + ' and above'}. Scanner, coverage, and required reporting errors fail the action.`,

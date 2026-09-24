@@ -55572,6 +55572,10 @@ function parseInputs(read, workspace) {
     throw new Error(`paths cannot be combined with scope: ${scope}. Remove paths to scan changes, or use scope: repository to scan selected paths.`);
   const diffBase = single("diff-base") || void 0;
   if (diffBase && scope !== "diff") throw new Error("diff-base requires scope: diff.");
+  const mode = choice("mode", ["standard", "deep"], "standard");
+  if (mode === "deep" && scope !== "repository") throw new Error("mode: deep requires scope: repository.");
+  const maxTimeHours = num("max-time-hours", false, Number.MIN_VALUE, 96);
+  if (maxTimeHours !== void 0 && mode !== "deep") throw new Error("max-time-hours requires mode: deep.");
   const dryRun = bool("dry-run", false);
   const artifactName = single("artifact-name", "codex-security");
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(artifactName)) throw new Error("artifact-name must be 1\u2013128 letters, numbers, dots, underscores, or hyphens.");
@@ -55582,9 +55586,11 @@ function parseInputs(read, workspace) {
     scope,
     paths,
     diffBase,
+    mode,
     model,
     effort: choice("effort", ["minimal", "low", "medium", "high", "xhigh", "max"], "xhigh"),
     maxCost: num("max-cost", false, Number.MIN_VALUE),
+    maxTimeHours,
     failOnSeverity: choice("fail-on-severity", ["none", "low", "medium", "high", "critical"], "none"),
     verbose: bool("verbose", true),
     dryRun,
@@ -55604,7 +55610,7 @@ function scanArguments(inputs, target, resultsDirectory, python) {
     "--provider",
     "openai",
     "--mode",
-    "standard",
+    inputs.mode,
     "--model",
     inputs.model,
     "--effort",
@@ -55622,7 +55628,8 @@ function scanArguments(inputs, target, resultsDirectory, python) {
   const options = [
     ["--diff", target.diffBase],
     ["--head", target.diffHead],
-    ["--max-cost", inputs.maxCost]
+    ["--max-cost", inputs.maxCost],
+    ["--max-time-hours", inputs.maxTimeHours]
   ];
   for (const [name, value] of options) if (value !== void 0) args.push(name, String(value));
   if (inputs.failOnSeverity !== "none") args.push("--fail-on-severity", inputs.failOnSeverity);
@@ -99095,7 +99102,7 @@ function resultSummary(result, inputs, target, secrets = []) {
   const parts = [
     `**Scan:** ${result.scanStatus} \xB7 **Findings policy:** ${result.policyStatus} \xB7 **Report:** ${result.reportStatus}`,
     `**Findings:** ${counts}`,
-    `**Scope:** ${inputs.scope}${inputs.paths.length ? ` <code>${esc(inputs.paths.join(", "))}</code>` : ""}`,
+    `**Scope:** ${inputs.scope}${inputs.paths.length ? ` <code>${esc(inputs.paths.join(", "))}</code>` : ""} \xB7 **Mode:** ${inputs.mode}`,
     `**Commit:** <code>${target.scannedSha}</code>`,
     `**Model:** <code>${esc(inputs.model)}</code> \xB7 **Reasoning effort:** ${inputs.effort}`,
     `**Failure threshold:** ${inputs.failOnSeverity === "none" ? "report-only findings" : inputs.failOnSeverity + " and above"}. Scanner, coverage, and required reporting errors fail the action.`,
@@ -99231,7 +99238,7 @@ async function runAction(actionRoot, overrides = {}) {
       if (!inputs.dryRun && (!apiKey || /[\r\n\u0000]/.test(apiKey))) throw new Error("Set CODEX_SECURITY_API_KEY in Actions secrets (or Dependabot secrets for Dependabot runs) and pass it as OPENAI_API_KEY to this step. No scan was started.");
       tempRoot = await (0, import_promises8.realpath)(process.env.RUNNER_TEMP ?? "");
       if (!process.env.RUNNER_TEMP) throw new Error("RUNNER_TEMP is required.");
-      info(`Preparing Codex Security ${SUPPORTED_CLI_VERSION}. Scope: ${inputs.scope}; effort: ${inputs.effort}.`);
+      info(`Preparing Codex Security ${SUPPORTED_CLI_VERSION}. Scope: ${inputs.scope}; mode: ${inputs.mode}; effort: ${inputs.effort}.`);
       const preparationStarted = performance.now();
       let timer = heartbeat("CLI preparation", preparationStarted);
       try {

@@ -1,6 +1,6 @@
 export const INPUT_NAMES = [
-  'repository', 'scope', 'paths', 'diff-base',
-  'model', 'effort', 'max-cost', 'fail-on-severity', 'verbose', 'dry-run',
+  'repository', 'scope', 'paths', 'diff-base', 'mode',
+  'model', 'effort', 'max-cost', 'max-time-hours', 'fail-on-severity', 'verbose', 'dry-run',
   'summary', 'annotations',
   'upload-artifacts', 'artifact-name', 'retention-days',
 ] as const;
@@ -13,9 +13,11 @@ export interface Inputs {
   scope: Scope;
   paths: string[];
   diffBase?: string;
+  mode: 'standard' | 'deep';
   model: string;
   effort: string;
   maxCost?: number;
+  maxTimeHours?: number;
   failOnSeverity: Threshold;
   verbose: boolean;
   dryRun: boolean;
@@ -67,15 +69,19 @@ export function parseInputs(read: (name: string) => string, workspace: string): 
     throw new Error(`paths cannot be combined with scope: ${scope}. Remove paths to scan changes, or use scope: repository to scan selected paths.`);
   const diffBase = single('diff-base') || undefined;
   if (diffBase && scope !== 'diff') throw new Error('diff-base requires scope: diff.');
+  const mode = choice('mode', ['standard', 'deep'], 'standard');
+  if (mode === 'deep' && scope !== 'repository') throw new Error('mode: deep requires scope: repository.');
+  const maxTimeHours = num('max-time-hours', false, Number.MIN_VALUE, 96);
+  if (maxTimeHours !== undefined && mode !== 'deep') throw new Error('max-time-hours requires mode: deep.');
   const dryRun = bool('dry-run', false);
   const artifactName = single('artifact-name', 'codex-security');
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(artifactName)) throw new Error('artifact-name must be 1–128 letters, numbers, dots, underscores, or hyphens.');
   const model = single('model', 'gpt-5.6-sol');
   if (model.startsWith('-')) throw new Error('model must be a model name, not a CLI option.');
   return {
-    repository: single('repository', workspace), scope, paths, diffBase,
+    repository: single('repository', workspace), scope, paths, diffBase, mode,
     model, effort: choice('effort', ['minimal','low','medium','high','xhigh','max'], 'xhigh'),
-    maxCost: num('max-cost', false, Number.MIN_VALUE), failOnSeverity: choice('fail-on-severity', ['none','low','medium','high','critical'], 'none'),
+    maxCost: num('max-cost', false, Number.MIN_VALUE), maxTimeHours, failOnSeverity: choice('fail-on-severity', ['none','low','medium','high','critical'], 'none'),
     verbose: bool('verbose', true), dryRun,
     summary: bool('summary', true), annotations: bool('annotations', true),
     uploadArtifacts: bool('upload-artifacts', false), artifactName, retentionDays: num('retention-days', true, 1, 90) ?? 7,
@@ -86,7 +92,7 @@ export function scanArguments(inputs: Inputs, target: {repository: string; diffB
   // The pinned CLI checks API-key presence even during local preflight. Its
   // dry-run branch never starts a model session; auto allows keyless preflight
   // with our empty private credential home. Real scans always use api-key.
-  const args = ['scan', target.repository, '--auth', inputs.dryRun ? 'auto' : 'api-key', '--provider', 'openai', '--mode', 'standard',
+  const args = ['scan', target.repository, '--auth', inputs.dryRun ? 'auto' : 'api-key', '--provider', 'openai', '--mode', inputs.mode,
     '--model', inputs.model, '--effort', inputs.effort, '--headless', '--python', python,
     '--output-dir', resultsDirectory, '--format', 'json'];
   // Preserve the pinned CLI's sandbox and automatic approval-review defaults.
@@ -95,6 +101,7 @@ export function scanArguments(inputs: Inputs, target: {repository: string; diffB
   for (const path of inputs.paths) args.push('--path', path);
   const options: Array<[string, string | number | undefined]> = [
     ['--diff', target.diffBase], ['--head', target.diffHead], ['--max-cost', inputs.maxCost],
+    ['--max-time-hours', inputs.maxTimeHours],
   ];
   for (const [name, value] of options) if (value !== undefined) args.push(name, String(value));
   if (inputs.failOnSeverity !== 'none') args.push('--fail-on-severity', inputs.failOnSeverity);
