@@ -105,11 +105,11 @@ including policy changes in the PR. Review those changes alongside the code.
 
 ## Scan settings
 
+The Action runs standard scans of a repository, selected paths, or committed changes.
 Keep unrelated credentials and deployment steps in separate jobs.
 
 - Set `paths` to newline-separated files or folders to scan part of a repository.
-- Set `mode: deep` for repeated discovery passes. Deep mode and `paths` require
-  repository scope.
+  This requires repository scope.
 - For diff scans outside PR events, set `diff-base`.
 - Set `dry-run: 'true'` to check configuration without an API key or model calls.
   Use a separate setup job; dry-run does not assess code or verify model access.
@@ -148,7 +148,7 @@ then add this step after it:
 ```
 
 Complete scans remain uploadable when findings exceed the severity threshold.
-Incomplete scans, dry runs, and working-tree snapshots are not uploadable.
+Incomplete scans and dry runs are not uploadable.
 Use a distinct category for each scan scope, such as repository and PR scans.
 See [GitHub's SARIF upload requirements](https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/integrate-with-existing-tools/upload-sarif-file)
 for code scanning availability and permissions.
@@ -213,26 +213,13 @@ Inputs are strings. Quote booleans and use newline-separated literal paths for l
 | Input | Default | Meaning |
 | --- | --- | --- |
 | `repository` | `${{ github.workspace }}` | Checkout root. Use paths to select folders within the checkout. |
-| `scope` | `repository` | repository, diff, or working-tree. Select diff for PR changes only; repository scans the full checkout. |
+| `scope` | `repository` | repository or diff. Select diff for PR changes only; repository scans the full checkout. |
 | `paths` | Unset | Newline-delimited literal repository-relative files or folders. Only for repository scope; no globs. |
 | `diff-base` | Unset | Diff base revision. Defaults to the PR merge base; required outside PRs when scope is diff. |
-| `diff-head` | Unset | Diff head revision. Defaults to the PR head or HEAD and must match the checkout. |
-| `working-tree-base` | Unset | Base for working-tree changes. Defaults to HEAD; requires working-tree scope. |
-| `mode` | `standard` | standard or deep. Deep supports repository and path scans only. |
 | `model` | `gpt-5.6-sol` | Model with access through your API key. Cost limits require CLI pricing support for the model. |
 | `effort` | `xhigh` | Reasoning effort: minimal, low, medium, high, xhigh, or max (subject to model support). |
 | `max-cost` | Unset | Positive estimated USD stop threshold per invocation. In-flight requests can exceed it; unset means no cost limit. |
 | `fail-on-severity` | `none` | none, low, medium, high, or critical. Scanner/coverage/report failures fail independently. |
-| `knowledge-base` | Unset | Newline-delimited repository-relative context files or directories. The CLI selects supported documents; selected paths must not traverse symlinks. |
-| `scan-prompt-file` | Unset | Repository-relative file of additional scan instructions (maximum 1 MiB). |
-| `validation-prompt-file` | Unset | Repository-relative file replacing final validation. Standard mode only (maximum 1 MiB). |
-| `workers` | Unset | Maximum concurrent deep-scan discovery workers (positive integer; deep only). |
-| `subagents` | Unset | Subagents per deep discovery worker (nonnegative integer; deep only). |
-| `stop-after-no-new` | Unset | Stop after this many discovery runs find no new issues (positive integer; deep only). |
-| `max-discovery-runs` | Unset | Maximum discovery runs (positive integer; deep only). |
-| `max-time-hours` | Unset | Deep discovery duration, greater than 0 and at most 96 hours. Job timeout still applies. |
-| `codex-config` | Unset | Newline-delimited TOML settings. Allowed: analytics.enabled (boolean) and features.multi_agent_v2.max_concurrent_threads_per_session (positive integer). |
-| `safety-identifier` | Unset | Stable hashed end-user identifier for model requests (1–64 characters). |
 | `verbose` | `true` | Stream bounded, credential-redacted CLI diagnostics to the job log. Set false for lifecycle and elapsed-time messages only. |
 | `dry-run` | `false` | Validate local configuration without a scan or API key. Does not verify authentication or model access. Use a separate non-required job. |
 | `summary` | `true` | Write a human-readable job summary. |
@@ -256,8 +243,8 @@ All outputs are strings. An empty cost or count means unavailable, not zero.
 | `policy-status` | passed, failed, or not-evaluated. Incomplete scans never pass the policy. |
 | `report-status` | ready, partial, or failed. Missing optional SARIF yields partial without failing the scan; required reporting failures yield failed. |
 | `exit-code` | CLI exit code, or empty if the CLI was not started. |
-| `scanned-sha` | Verified checkout commit SHA. Working-tree contents are not represented by this SHA alone. |
-| `analysis-ref` | GitHub ref matching the scanned revision. Empty for working-tree scans. |
+| `scanned-sha` | Verified checkout commit SHA. |
+| `analysis-ref` | GitHub ref matching the scanned revision. |
 | `sarif-upload-ready` | true only for complete, validated reports with a publishable immutable revision. Remains true after severity-policy failure. |
 | `critical-count` | Available critical findings, or empty before results are available. |
 | `high-count` | Available high findings, or empty before results are available. |

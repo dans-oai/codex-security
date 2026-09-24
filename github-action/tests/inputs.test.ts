@@ -5,29 +5,30 @@ const parse = (values: Record<string, string> = {}) => parseInputs(key => values
 
 test('defaults are stable across events', () => {
   const input = parse();
-  assert.equal(input.scope, 'repository'); assert.equal(input.mode, 'standard');
-  assert.equal(input.effort, 'xhigh'); assert.equal(input.failOnSeverity, 'none');
-  assert.equal(input.uploadArtifacts, false);
-  assert.equal(input.verbose, true);
+  assert.deepEqual(input, {
+    repository: '/checkout', scope: 'repository', paths: [], diffBase: undefined,
+    model: 'gpt-5.6-sol', effort: 'xhigh', maxCost: undefined, failOnSeverity: 'none',
+    verbose: true, dryRun: false, summary: true, annotations: true,
+    uploadArtifacts: false, artifactName: 'codex-security', retentionDays: 7,
+  });
+  const args = scanArguments(input, {repository:'/checkout'}, '/results', '/usr/bin/python3');
+  assert.equal(args[args.indexOf('--mode') + 1], 'standard');
+  assert.ok(!args.includes('--fail-on-severity'));
 });
 test('verbose diagnostics default on and can be explicitly disabled', () => {
   const args = (values: Record<string, string>) => scanArguments(parse(values), {repository:'/checkout'}, '/results', '/usr/bin/python3');
   assert.ok(args({}).includes('--verbose'));
   assert.ok(!args({verbose:'false'}).includes('--verbose'));
 });
-test('diff/path conflicts and unsupported deep controls fail before execution', () => {
-  for (const scope of ['diff','working-tree']) assert.throws(() => parse({scope, paths:'src\nlib'}), /cannot be combined/);
-  for (const scope of ['diff','working-tree']) assert.throws(() => parse({scope, mode:'deep'}), /deep supports/);
-  assert.throws(() => parse({workers:'2'}), /require mode: deep/);
-  assert.throws(() => parse({'validation-prompt-file':'context.md', mode:'deep'}), /not supported/);
-  assert.throws(() => parse({'diff-head':'HEAD'}), /require scope: diff/);
+test('only repository and diff scopes are supported, with separate path and diff inputs', () => {
+  assert.throws(() => parse({scope:'diff', paths:'src\nlib'}), /cannot be combined/);
+  assert.throws(() => parse({scope:'working-tree'}), /scope must be one of: repository, diff/);
+  assert.throws(() => parse({'diff-base':'HEAD~1'}), /requires scope: diff/);
 });
 test('numeric and boolean parsing rejects ambiguous or unbounded input', () => {
   for (const value of ['NaN','Infinity','-1','0','1e99','10 dollars']) assert.throws(() => parse({'max-cost':value}));
   for (const value of ['yes','TRUE','1']) assert.throws(() => parse({verbose:value}));
-  assert.throws(() => parse({mode:'deep', 'max-time-hours':'97'}));
-  assert.throws(() => parse({mode:'deep', workers:'1.5'}));
-  assert.equal(parse({mode:'deep', subagents:'0'}).subagents, 0);
+  for (const value of ['0','1.5','91']) assert.throws(() => parse({'retention-days':value}));
 });
 test('path lists accept spaces but reject traversal, globs, and option injection', () => {
   assert.deepEqual(parse({paths:'src/my folder\nlib'}).paths, ['src/my folder','lib']);
@@ -40,19 +41,15 @@ test('CLI path arguments use normalized, deduplicated repository-relative paths'
   const args = scanArguments(input, {repository:'/checkout'}, '/results', '/usr/bin/python3');
   assert.deepEqual(args.flatMap((arg, index) => arg === '--path' ? [args[index + 1]] : []), input.paths);
 });
-test('config cannot override credentials, executables, approval or supplied model', () => {
-  for (const entry of ['approval_policy="never"','approval_policy="on-request"','model="x"','profile="x"','mcp_servers.x.command="evil"','plugins=[]','analytics.enabled="false"','analytics.enabled=false\nanalytics.enabled=true'])
-    assert.throws(() => parse({'codex-config':entry}));
-  assert.equal(parse({'codex-config':'analytics.enabled=false\nfeatures.multi_agent_v2.max_concurrent_threads_per_session=4'}).codexConfig.length, 2);
+test('model cannot inject a CLI option', () => {
   assert.throws(() => parse({'model':'--plugin-path=evil'}), /not a CLI option/);
-  assert.throws(() => parse({'safety-identifier':'--patch'}), /hyphen/);
 });
 test('dry-run allows keyless configuration validation', () => {
   const dryArgs=scanArguments(parse({'dry-run':'true'}),{repository:'/checkout'},'/results','/usr/bin/python3');
   assert.equal(dryArgs[dryArgs.indexOf('--auth')+1],'auto'); assert.ok(dryArgs.includes('--dry-run'));
 });
 test('CLI arguments preserve literal values and enforce CI policy', () => {
-  const input = parse({paths:'src/my folder',model:'model; echo never-execute', 'max-cost':'5', 'fail-on-severity':'high'});
+  const input = parse({paths:'src/my folder',model:'model; echo never-execute', effort:'medium', 'max-cost':'5', 'fail-on-severity':'high'});
   const args = scanArguments(input, {repository:'/checkout'}, '/private/results', '/usr/bin/python3');
   assert.equal(args[args.indexOf('--provider') + 1], 'openai');
   assert.equal(args[args.indexOf('--auth') + 1], 'api-key');
@@ -60,6 +57,25 @@ test('CLI arguments preserve literal values and enforce CI policy', () => {
   assert.ok(!args.some(arg => arg.startsWith('approval_policy=')));
   assert.ok(!args.some(arg => arg.startsWith('approvals_reviewer=')));
   assert.ok(args.includes('analytics.enabled=false'));
+  assert.equal(args[args.indexOf('--effort') + 1], 'medium');
+  assert.equal(args[args.indexOf('--max-cost') + 1], '5');
   assert.equal(args[args.indexOf('--fail-on-severity') + 1], 'high');
   assert.ok(!args.some(value => value.includes('API_KEY')));
+});
+test('diff arguments use the verified checkout and resolved comparison revisions', () => {
+  const input = parse({repository:'component', scope:'diff', 'diff-base':'main'});
+  assert.equal(input.repository, 'component');
+  assert.equal(input.diffBase, 'main');
+  const args = scanArguments(input, {repository:'/checkout/component', diffBase:'base-sha', diffHead:'head-sha'}, '/results', '/usr/bin/python3');
+  assert.equal(args[1], '/checkout/component');
+  assert.equal(args[args.indexOf('--diff') + 1], 'base-sha');
+  assert.equal(args[args.indexOf('--head') + 1], 'head-sha');
+});
+test('report publication and artifact settings remain configurable', () => {
+  const input = parse({summary:'false', annotations:'false', 'upload-artifacts':'true', 'artifact-name':'reports-component', 'retention-days':'14'});
+  assert.equal(input.summary, false);
+  assert.equal(input.annotations, false);
+  assert.equal(input.uploadArtifacts, true);
+  assert.equal(input.artifactName, 'reports-component');
+  assert.equal(input.retentionDays, 14);
 });

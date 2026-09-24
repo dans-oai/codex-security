@@ -8,19 +8,12 @@ inputs:
     description: Checkout root. Use paths to select folders within the checkout.
     default: ${{ github.workspace }}
   scope:
-    description: 'repository, diff, or working-tree. Select diff for PR changes only; repository scans the full checkout.'
+    description: 'repository or diff. Select diff for PR changes only; repository scans the full checkout.'
     default: repository
   paths:
     description: Newline-delimited literal repository-relative files or folders. Only for repository scope; no globs.
   diff-base:
     description: Diff base revision. Defaults to the PR merge base; required outside PRs when scope is diff.
-  diff-head:
-    description: Diff head revision. Defaults to the PR head or HEAD and must match the checkout.
-  working-tree-base:
-    description: Base for working-tree changes. Defaults to HEAD; requires working-tree scope.
-  mode:
-    description: 'standard or deep. Deep supports repository and path scans only.'
-    default: standard
   model:
     description: Model with access through your API key. Cost limits require CLI pricing support for the model.
     default: gpt-5.6-sol
@@ -32,26 +25,6 @@ inputs:
   fail-on-severity:
     description: 'none, low, medium, high, or critical. Scanner/coverage/report failures fail independently.'
     default: none
-  knowledge-base:
-    description: Newline-delimited repository-relative context files or directories. The CLI selects supported documents; selected paths must not traverse symlinks.
-  scan-prompt-file:
-    description: Repository-relative file of additional scan instructions (maximum 1 MiB).
-  validation-prompt-file:
-    description: Repository-relative file replacing final validation. Standard mode only (maximum 1 MiB).
-  workers:
-    description: Maximum concurrent deep-scan discovery workers (positive integer; deep only).
-  subagents:
-    description: Subagents per deep discovery worker (nonnegative integer; deep only).
-  stop-after-no-new:
-    description: Stop after this many discovery runs find no new issues (positive integer; deep only).
-  max-discovery-runs:
-    description: Maximum discovery runs (positive integer; deep only).
-  max-time-hours:
-    description: Deep discovery duration, greater than 0 and at most 96 hours. Job timeout still applies.
-  codex-config:
-    description: 'Newline-delimited TOML settings. Allowed: analytics.enabled (boolean) and features.multi_agent_v2.max_concurrent_threads_per_session (positive integer).'
-  safety-identifier:
-    description: Stable hashed end-user identifier for model requests (1–64 characters).
   verbose:
     description: Stream bounded, credential-redacted CLI diagnostics to the job log. Set false for lifecycle and elapsed-time messages only.
     default: 'true'
@@ -93,9 +66,9 @@ outputs:
   exit-code:
     description: CLI exit code, or empty if the CLI was not started.
   scanned-sha:
-    description: Verified checkout commit SHA. Working-tree contents are not represented by this SHA alone.
+    description: Verified checkout commit SHA.
   analysis-ref:
-    description: GitHub ref matching the scanned revision. Empty for working-tree scans.
+    description: GitHub ref matching the scanned revision.
   sarif-upload-ready:
     description: 'true only for complete, validated reports with a publishable immutable revision. Remains true after severity-policy failure.'
   critical-count:

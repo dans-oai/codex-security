@@ -90,7 +90,7 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
       if (!inputs.dryRun && (!apiKey || /[\r\n\u0000]/.test(apiKey))) throw new Error('Set CODEX_SECURITY_API_KEY in Actions secrets (or Dependabot secrets for Dependabot runs) and pass it as OPENAI_API_KEY to this step. No scan was started.');
       tempRoot = await realpath(process.env.RUNNER_TEMP ?? '');
       if (!process.env.RUNNER_TEMP) throw new Error('RUNNER_TEMP is required.');
-      core.info(`Preparing Codex Security ${SUPPORTED_CLI_VERSION}. Scope: ${inputs.scope}; mode: ${inputs.mode}; effort: ${inputs.effort}.`);
+      core.info(`Preparing Codex Security ${SUPPORTED_CLI_VERSION}. Scope: ${inputs.scope}; effort: ${inputs.effort}.`);
       const preparationStarted = performance.now();
       let timer = heartbeat('CLI preparation', preparationStarted);
       try { runtime = await deps.setupRuntime({actionRoot, tempRoot, log: core.info}); }
@@ -102,7 +102,7 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
       const log = (message: string): void => {
         for (const line of safeLogLines(message, secrets)) core.info(line);
       };
-      log(`Target commit: ${target.scannedSha}.${target.diffBase ? ` Diff: ${target.diffBase}..${target.diffHead}.` : ''}${target.workingTreeBase ? ` Working-tree base: ${target.workingTreeBase}.` : ''}`);
+      log(`Target commit: ${target.scannedSha}.${target.diffBase ? ` Diff: ${target.diffBase}..${target.diffHead}.` : ''}`);
       if (inputs.paths.length) log(`Paths: ${inputs.paths.join(', ')}.`);
       log(`Model: ${inputs.model}; estimated cost stop threshold: ${inputs.maxCost === undefined ? 'unset' : `$${inputs.maxCost}`}; findings failure threshold: ${inputs.failOnSeverity}.`);
       const scanLabel = inputs.dryRun ? 'CLI configuration validation' : 'Security scan';
@@ -137,7 +137,7 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
         catch { checkoutError = 'The source checkout changed during scanning. Results cannot establish a completed scan of the requested revision.'; }
         const resultOptions = {stdout: execution.stdout, resultsDirectory: runtime.resultsDirectory,
           exitCode: interrupted || checkoutError ? 2 : execution.exitCode,
-          publishable: target.publishable && inputs.scope !== 'working-tree' && !interrupted && !checkoutError};
+          publishable: target.publishable && !interrupted && !checkoutError};
         let result = await analyzeResults(resultOptions);
         if (result.paths.jsonPath && !result.paths.sarifPath && !interrupted && !checkoutError) {
           core.info('Producing a SARIF export from the validated scan.');

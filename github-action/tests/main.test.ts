@@ -118,11 +118,6 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
       coverage.mode = 'branch_diff';
       sarif.runs[0].properties.codexSecurityTargetKind = 'git_diff';
     }
-    if (process.env.INPUT_SCOPE === 'working-tree') {
-      Object.assign(manifest.scan.target, { kind: 'git_diff', baseRevision: sha, headRevision: sha });
-      coverage.mode = 'working_tree';
-      sarif.runs[0].properties.codexSecurityTargetKind = 'git_diff';
-    }
     if (incomplete) {
       coverage.completeness = 'partial';
       coverage.deferred = [{id: 'unreviewed-route', reason: 'Dependency <example> unavailable; validation deferred.'}];
@@ -434,14 +429,6 @@ test('requested artifact upload failure remains fatal without SARIF', async (t) 
   assert.equal(result.outputs['results-directory'], ''); assert.equal(result.outputs['sarif-path'], '');
   assert.match(result.logs, /::error::Scan completed, but required reporting failed\./);
   assert.match(result.summary, /Synthetic artifact upload failure/);
-});
-
-test('working-tree results retain local reports without code-scanning upload', async (t) => {
-  const app = await harness(t); app.setInput('scope', 'working-tree');
-  await writeFile(join(app.repository, 'app.txt'), 'local change\n');
-  const result = await app.run();
-  assert.equal(result.exitCode, 0); assert.equal(result.outputs['scan-status'], 'completed');
-  assert.equal(result.outputs['sarif-upload-ready'], 'false'); assert.equal(result.outputs['analysis-ref'], '');
 });
 
 test('CLI authentication failure is not reported as a findings threshold failure', async (t) => {

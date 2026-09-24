@@ -55567,43 +55567,14 @@ function parseInputs(read, workspace) {
     return value;
   };
   const paths = [...new Set(list("paths").map((v) => safeRelative("paths", v).split("/").filter((part) => part && part !== ".").join("/") || "."))];
-  const scope = choice("scope", ["repository", "diff", "working-tree"], "repository");
+  const scope = choice("scope", ["repository", "diff"], "repository");
   if (scope !== "repository" && paths.length)
     throw new Error(`paths cannot be combined with scope: ${scope}. Remove paths to scan changes, or use scope: repository to scan selected paths.`);
-  const mode = choice("mode", ["standard", "deep"], "standard");
-  if (mode === "deep" && scope !== "repository") throw new Error("mode: deep supports repository and path scans only. Use mode: standard for changes.");
   const diffBase = single("diff-base") || void 0;
-  const diffHead = single("diff-head") || void 0;
-  const workingTreeBase = single("working-tree-base") || void 0;
-  if ((diffBase || diffHead) && scope !== "diff") throw new Error("diff-base and diff-head require scope: diff.");
-  if (workingTreeBase && scope !== "working-tree") throw new Error("working-tree-base requires scope: working-tree.");
-  const validationPromptFile = single("validation-prompt-file") || void 0;
-  if (validationPromptFile && mode === "deep") throw new Error("validation-prompt-file is not supported in deep mode.");
-  const deep = {
-    workers: num("workers", true, 1),
-    subagents: num("subagents", true),
-    stopAfterNoNew: num("stop-after-no-new", true, 1),
-    maxDiscoveryRuns: num("max-discovery-runs", true, 1),
-    maxTimeHours: num("max-time-hours", false, Number.MIN_VALUE, 96)
-  };
-  if (mode !== "deep" && Object.values(deep).some((v) => v !== void 0)) throw new Error("workers, subagents, and discovery limits require mode: deep.");
-  const codexConfig = list("codex-config");
-  const keys = /* @__PURE__ */ new Set();
-  for (const entry of codexConfig) {
-    const match = /^(analytics\.enabled|features\.multi_agent_v2\.max_concurrent_threads_per_session)\s*=\s*(true|false|\d+)$/.exec(entry);
-    if (!match) throw new Error("codex-config supports only analytics.enabled (boolean) and features.multi_agent_v2.max_concurrent_threads_per_session (positive integer). Use model and effort inputs for reasoning settings.");
-    const [, key, value] = match;
-    if (keys.has(key)) throw new Error(`Duplicate codex-config key: ${key}.`);
-    keys.add(key);
-    if (key === "analytics.enabled" ? !["true", "false"].includes(value) : !/^\d+$/.test(value) || Number(value) < 1 || !Number.isSafeInteger(Number(value)))
-      throw new Error(`Invalid value for codex-config key: ${key}.`);
-  }
+  if (diffBase && scope !== "diff") throw new Error("diff-base requires scope: diff.");
   const dryRun = bool("dry-run", false);
   const artifactName = single("artifact-name", "codex-security");
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(artifactName)) throw new Error("artifact-name must be 1\u2013128 letters, numbers, dots, underscores, or hyphens.");
-  const safetyIdentifier = single("safety-identifier") || void 0;
-  if (safetyIdentifier && safetyIdentifier.length > 64) throw new Error("safety-identifier must be at most 64 characters.");
-  if (safetyIdentifier?.startsWith("-")) throw new Error("safety-identifier cannot begin with a hyphen.");
   const model = single("model", "gpt-5.6-sol");
   if (model.startsWith("-")) throw new Error("model must be a model name, not a CLI option.");
   return {
@@ -55611,19 +55582,10 @@ function parseInputs(read, workspace) {
     scope,
     paths,
     diffBase,
-    diffHead,
-    workingTreeBase,
-    mode,
     model,
     effort: choice("effort", ["minimal", "low", "medium", "high", "xhigh", "max"], "xhigh"),
     maxCost: num("max-cost", false, Number.MIN_VALUE),
     failOnSeverity: choice("fail-on-severity", ["none", "low", "medium", "high", "critical"], "none"),
-    knowledgeBase: list("knowledge-base").map((v) => safeRelative("knowledge-base", v)),
-    scanPromptFile: single("scan-prompt-file") ? safeRelative("scan-prompt-file", single("scan-prompt-file")) : void 0,
-    validationPromptFile: validationPromptFile ? safeRelative("validation-prompt-file", validationPromptFile) : void 0,
-    ...deep,
-    codexConfig,
-    safetyIdentifier,
     verbose: bool("verbose", true),
     dryRun,
     summary: bool("summary", true),
@@ -55642,7 +55604,7 @@ function scanArguments(inputs, target, resultsDirectory, python) {
     "--provider",
     "openai",
     "--mode",
-    inputs.mode,
+    "standard",
     "--model",
     inputs.model,
     "--effort",
@@ -55655,26 +55617,14 @@ function scanArguments(inputs, target, resultsDirectory, python) {
     "--format",
     "json"
   ];
-  if (!inputs.codexConfig.some((v) => v.startsWith("analytics.enabled"))) args.push("--codex", "analytics.enabled=false");
+  args.push("--codex", "analytics.enabled=false");
   for (const path6 of inputs.paths) args.push("--path", path6);
-  for (const path6 of inputs.knowledgeBase) args.push("--knowledge-base", path6);
-  for (const entry of inputs.codexConfig) args.push("--codex", entry);
   const options = [
     ["--diff", target.diffBase],
     ["--head", target.diffHead],
-    ["--base", target.workingTreeBase],
-    ["--max-cost", inputs.maxCost],
-    ["--workers", inputs.workers],
-    ["--subagents", inputs.subagents],
-    ["--stop-after-no-new", inputs.stopAfterNoNew],
-    ["--max-discovery-runs", inputs.maxDiscoveryRuns],
-    ["--max-time-hours", inputs.maxTimeHours],
-    ["--scan-prompt-file", inputs.scanPromptFile],
-    ["--validation-prompt-file", inputs.validationPromptFile],
-    ["--safety-identifier", inputs.safetyIdentifier]
+    ["--max-cost", inputs.maxCost]
   ];
   for (const [name, value] of options) if (value !== void 0) args.push(name, String(value));
-  if (inputs.scope === "working-tree") args.push("--working-tree");
   if (inputs.failOnSeverity !== "none") args.push("--fail-on-severity", inputs.failOnSeverity);
   if (inputs.verbose) args.push("--verbose");
   if (inputs.dryRun) args.push("--dry-run");
@@ -55851,7 +55801,7 @@ async function commit(repository, value) {
   if (!SHA.test(sha)) throw new Error("Git revision did not resolve to a commit ID.");
   return sha;
 }
-async function containedPath(repository, input, kind = "either") {
+async function containedPath(repository, input) {
   const path6 = (0, import_node_path2.resolve)(repository, input);
   const rel = (0, import_node_path2.relative)(repository, path6);
   if ((0, import_node_path2.isAbsolute)(rel) || rel === ".." || rel.startsWith(`..${import_node_path2.sep}`)) throw new Error("A requested path escapes the repository.");
@@ -55859,11 +55809,10 @@ async function containedPath(repository, input, kind = "either") {
   for (const segment of rel.split(import_node_path2.sep).filter(Boolean)) {
     cursor = (0, import_node_path2.resolve)(cursor, segment);
     const stat2 = await (0, import_promises.lstat)(cursor);
-    if (stat2.isSymbolicLink()) throw new Error("Requested paths/context must not traverse symlinks.");
+    if (stat2.isSymbolicLink()) throw new Error("Requested paths must not traverse symlinks.");
   }
   const info2 = await (0, import_promises.lstat)(path6);
-  if (kind === "file" ? !info2.isFile() : !info2.isFile() && !info2.isDirectory()) throw new Error("A requested path is not a regular file or directory.");
-  if (info2.isFile() && kind === "file" && info2.size > 1024 * 1024) throw new Error("Custom prompt files must not exceed 1 MiB.");
+  if (!info2.isFile() && !info2.isDirectory()) throw new Error("A requested path is not a regular file or directory.");
   return path6;
 }
 function originMatches(url2, repository) {
@@ -55890,29 +55839,22 @@ async function resolveTarget(inputs, event) {
   if (pr && scannedSha !== pr.head.sha) throw new Error("PR scans must check out github.event.pull_request.head.sha, not the merge commit.");
   if (!pr && scannedSha !== event.sha) throw new Error("Checkout HEAD must match GITHUB_SHA. Select the intended branch when dispatching; do not silently check out a different revision.");
   const status = await git(repository, ["status", "--porcelain=v1", "-z", "--untracked-files=normal"]);
-  if (inputs.scope !== "working-tree" && status) throw new Error("The checkout has local changes. Scan a clean checkout, or select scope: working-tree for local changes.");
-  if (inputs.scope === "working-tree" && pr) throw new Error("working-tree scope cannot be used as a PR security check. Use scope: diff.");
+  if (status) throw new Error("The checkout has local changes. Scan a clean checkout.");
   for (const path6 of inputs.paths) await containedPath(repository, path6);
-  if (inputs.scanPromptFile) await containedPath(repository, inputs.scanPromptFile, "file");
-  if (inputs.validationPromptFile) await containedPath(repository, inputs.validationPromptFile, "file");
-  for (const path6 of inputs.knowledgeBase) await containedPath(repository, path6);
   let diffBase;
   let diffHead;
-  let workingTreeBase;
   let emptyDiff = false;
   if (inputs.scope === "diff") {
-    diffHead = await commit(repository, inputs.diffHead || scannedSha);
-    if (diffHead !== scannedSha) throw new Error("diff-head must match the checked-out HEAD.");
+    diffHead = scannedSha;
     if (inputs.diffBase) diffBase = await commit(repository, inputs.diffBase);
     else if (pr) diffBase = (await git(repository, ["merge-base", pr.base.sha, diffHead])).trim();
     else throw new Error("diff-base is required for diff scans outside pull_request events.");
     if (!SHA.test(diffBase)) throw new Error("Could not resolve the diff base. Fetch full history.");
     emptyDiff = !await git(repository, ["diff", "--no-ext-diff", "--no-textconv", "--name-only", "-z", diffBase, diffHead, "--"]);
   }
-  if (inputs.scope === "working-tree") workingTreeBase = await commit(repository, inputs.workingTreeBase || "HEAD");
   const analysisRef = pr ? `refs/pull/${pr.number ?? event.payload.number}/head` : event.ref;
-  const publishable = inputs.scope !== "working-tree" && /^refs\/(heads|tags|pull)\//.test(analysisRef);
-  return { repository, scannedSha, analysisRef: publishable ? analysisRef : "", publishable, emptyDiff, diffBase, diffHead, workingTreeBase };
+  const publishable = /^refs\/(heads|tags|pull)\//.test(analysisRef);
+  return { repository, scannedSha, analysisRef: publishable ? analysisRef : "", publishable, emptyDiff, diffBase, diffHead };
 }
 
 // src/runtime.ts
@@ -99153,7 +99095,7 @@ function resultSummary(result, inputs, target, secrets = []) {
   const parts = [
     `**Scan:** ${result.scanStatus} \xB7 **Findings policy:** ${result.policyStatus} \xB7 **Report:** ${result.reportStatus}`,
     `**Findings:** ${counts}`,
-    `**Scope:** ${inputs.scope}${inputs.paths.length ? ` <code>${esc(inputs.paths.join(", "))}</code>` : ""} \xB7 **Mode:** ${inputs.mode}`,
+    `**Scope:** ${inputs.scope}${inputs.paths.length ? ` <code>${esc(inputs.paths.join(", "))}</code>` : ""}`,
     `**Commit:** <code>${target.scannedSha}</code>`,
     `**Model:** <code>${esc(inputs.model)}</code> \xB7 **Reasoning effort:** ${inputs.effort}`,
     `**Failure threshold:** ${inputs.failOnSeverity === "none" ? "report-only findings" : inputs.failOnSeverity + " and above"}. Scanner, coverage, and required reporting errors fail the action.`,
@@ -99289,7 +99231,7 @@ async function runAction(actionRoot, overrides = {}) {
       if (!inputs.dryRun && (!apiKey || /[\r\n\u0000]/.test(apiKey))) throw new Error("Set CODEX_SECURITY_API_KEY in Actions secrets (or Dependabot secrets for Dependabot runs) and pass it as OPENAI_API_KEY to this step. No scan was started.");
       tempRoot = await (0, import_promises8.realpath)(process.env.RUNNER_TEMP ?? "");
       if (!process.env.RUNNER_TEMP) throw new Error("RUNNER_TEMP is required.");
-      info(`Preparing Codex Security ${SUPPORTED_CLI_VERSION}. Scope: ${inputs.scope}; mode: ${inputs.mode}; effort: ${inputs.effort}.`);
+      info(`Preparing Codex Security ${SUPPORTED_CLI_VERSION}. Scope: ${inputs.scope}; effort: ${inputs.effort}.`);
       const preparationStarted = performance.now();
       let timer = heartbeat("CLI preparation", preparationStarted);
       try {
@@ -99304,7 +99246,7 @@ async function runAction(actionRoot, overrides = {}) {
       const log2 = (message) => {
         for (const line of safeLogLines(message, secrets)) info(line);
       };
-      log2(`Target commit: ${target.scannedSha}.${target.diffBase ? ` Diff: ${target.diffBase}..${target.diffHead}.` : ""}${target.workingTreeBase ? ` Working-tree base: ${target.workingTreeBase}.` : ""}`);
+      log2(`Target commit: ${target.scannedSha}.${target.diffBase ? ` Diff: ${target.diffBase}..${target.diffHead}.` : ""}`);
       if (inputs.paths.length) log2(`Paths: ${inputs.paths.join(", ")}.`);
       log2(`Model: ${inputs.model}; estimated cost stop threshold: ${inputs.maxCost === void 0 ? "unset" : `$${inputs.maxCost}`}; findings failure threshold: ${inputs.failOnSeverity}.`);
       const scanLabel = inputs.dryRun ? "CLI configuration validation" : "Security scan";
@@ -99350,7 +99292,7 @@ async function runAction(actionRoot, overrides = {}) {
           stdout: execution.stdout,
           resultsDirectory: runtime.resultsDirectory,
           exitCode: interrupted || checkoutError ? 2 : execution.exitCode,
-          publishable: target.publishable && inputs.scope !== "working-tree" && !interrupted && !checkoutError
+          publishable: target.publishable && !interrupted && !checkoutError
         };
         let result = await analyzeResults(resultOptions);
         if (result.paths.jsonPath && !result.paths.sarifPath && !interrupted && !checkoutError) {

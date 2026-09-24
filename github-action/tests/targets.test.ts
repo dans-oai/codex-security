@@ -26,9 +26,22 @@ async function fixture(t: any) {
 }
 test('PR target resolves merge base and preserves exact upload head identity', async t => {
   const f=await fixture(t); const head=await f.change();
-  const target=await resolveTarget(f.inputs(),f.event(head));
+  f.run('checkout','-b','updated-base',f.base);
+  const updatedBase=await f.change('SECURITY.md','Updated policy.\n');
+  f.run('checkout','--detach',head);
+  const event=f.event(head);
+  event.payload.pull_request.base.sha=updatedBase;
+  const target=await resolveTarget(f.inputs(),event);
   assert.equal(target.diffBase,f.base); assert.equal(target.diffHead,head);
   assert.equal(target.analysisRef,'refs/pull/7/head'); assert.equal(target.publishable,true);
+});
+test('manual diff scans resolve an explicit base against the checked-out head', async t => {
+  const f=await fixture(t);
+  f.run('tag','scan-base');
+  const head=await f.change();
+  const target=await resolveTarget(f.inputs({scope:'diff','diff-base':'scan-base'}),f.event(head,'workflow_dispatch'));
+  assert.equal(target.diffBase,f.base); assert.equal(target.diffHead,head);
+  assert.equal(target.scannedSha,head); assert.equal(target.emptyDiff,false);
 });
 test('empty diff is a verified no-op and schedule has no PR dependency', async t => {
   const f=await fixture(t);
@@ -36,37 +49,31 @@ test('empty diff is a verified no-op and schedule has no PR dependency', async t
   const target=await resolveTarget(f.inputs({scope:'repository'}),f.event(f.base,'schedule'));
   assert.equal(target.analysisRef,'refs/heads/main'); assert.equal(target.diffBase,undefined);
 });
-test('knowledge-base document selection is left to the CLI', async t => {
+test('repository scans accept file and directory paths inside the checkout', async t => {
   const f=await fixture(t);
-  await mkdir(join(f.path,'docs'));
-  await writeFile(join(f.path,'docs/README.markdown'),'Project architecture.\n');
-  await writeFile(join(f.path,'docs/CONTEXT'),'Project context.\n');
-  await writeFile(join(f.path,'docs/image.png'),Buffer.from([0x89,0x50,0x4e,0x47,0]));
-  await symlink('README.markdown',join(f.path,'docs/link.md'));
-  f.run('add','.'); f.run('commit','-m','documentation');
-  const head=f.run('rev-parse','HEAD');
-  const inputs=f.inputs({'knowledge-base':'docs\ndocs/README.markdown\ndocs/CONTEXT'});
-  const target=await resolveTarget(inputs,f.event(head));
-  assert.equal(target.scannedSha,head);
+  const inputs=f.inputs({scope:'repository',paths:'src\nsrc/app.ts'});
+  const target=await resolveTarget(inputs,f.event(f.base,'schedule'));
+  assert.equal(target.scannedSha,f.base);
 });
-test('knowledge-base paths must stay inside the checkout without traversing symlinks', async t => {
+test('scan paths must stay inside the checkout without traversing symlinks', async t => {
   const f=await fixture(t);
   const outside=await fixture(t);
-  await symlink(outside.path,join(f.path,'linked-docs'));
-  f.run('add','.'); f.run('commit','-m','linked documentation');
+  await symlink(outside.path,join(f.path,'linked-src'));
+  f.run('add','.'); f.run('commit','-m','linked source');
   const head=f.run('rev-parse','HEAD');
-  await assert.rejects(resolveTarget({...f.inputs(),knowledgeBase:[outside.path]},f.event(head)),/escapes the repository/);
-  await assert.rejects(resolveTarget(f.inputs({'knowledge-base':'linked-docs/SECURITY.md'}),f.event(head)),/must not traverse symlinks/);
+  const event=f.event(head,'schedule');
+  await assert.rejects(resolveTarget({...f.inputs({scope:'repository'}),paths:[outside.path]},event),/escapes the repository/);
+  await assert.rejects(resolveTarget(f.inputs({scope:'repository',paths:'linked-src/src/app.ts'}),event),/must not traverse symlinks/);
 });
 test('wrong checkout, local changes, missing diff base and option revisions are refused',async t=>{
   const f=await fixture(t); const head=await f.change();
   await assert.rejects(resolveTarget(f.inputs(),f.event(f.base)),/must check out/);
+  await assert.rejects(resolveTarget(f.inputs({scope:'repository'}),f.event(f.base,'schedule')),/HEAD must match GITHUB_SHA/);
   await assert.rejects(resolveTarget(f.inputs(),f.event(head,'workflow_dispatch')),/diff-base is required/);
   await assert.rejects(resolveTarget(f.inputs({scope:'diff','diff-base':'--help'}),f.event(head)),/Git revision/);
   await writeFile(join(f.path,'src/app.ts'),'dirty');
   await assert.rejects(resolveTarget(f.inputs(),f.event(head)),/local changes/);
-  const local=await resolveTarget(f.inputs({scope:'working-tree'}),f.event(head,'workflow_dispatch'));
-  assert.equal(local.publishable,false); assert.equal(local.analysisRef,''); assert.equal(local.workingTreeBase,head);
+  await assert.rejects(resolveTarget(f.inputs({scope:'repository'}),f.event(head,'schedule')),/local changes/);
 });
 test('forks and privileged events fail eligibility',async t=>{
   const f=await fixture(t); const event=f.event(f.base);

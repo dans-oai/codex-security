@@ -19,7 +19,6 @@ export interface Target {
   emptyDiff: boolean;
   diffBase?: string;
   diffHead?: string;
-  workingTreeBase?: string;
 }
 const SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 export function validateEvent(event: EventContext): void {
@@ -60,7 +59,7 @@ async function commit(repository: string, value: string): Promise<string> {
   if (!SHA.test(sha)) throw new Error('Git revision did not resolve to a commit ID.');
   return sha;
 }
-export async function containedPath(repository: string, input: string, kind: 'file' | 'either' = 'either'): Promise<string> {
+export async function containedPath(repository: string, input: string): Promise<string> {
   const path = resolve(repository, input);
   const rel = relative(repository, path);
   if (isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`)) throw new Error('A requested path escapes the repository.');
@@ -68,11 +67,10 @@ export async function containedPath(repository: string, input: string, kind: 'fi
   for (const segment of rel.split(sep).filter(Boolean)) {
     cursor = resolve(cursor, segment);
     const stat = await lstat(cursor);
-    if (stat.isSymbolicLink()) throw new Error('Requested paths/context must not traverse symlinks.');
+    if (stat.isSymbolicLink()) throw new Error('Requested paths must not traverse symlinks.');
   }
   const info = await lstat(path);
-  if (kind === 'file' ? !info.isFile() : !info.isFile() && !info.isDirectory()) throw new Error('A requested path is not a regular file or directory.');
-  if (info.isFile() && kind === 'file' && info.size > 1024 * 1024) throw new Error('Custom prompt files must not exceed 1 MiB.');
+  if (!info.isFile() && !info.isDirectory()) throw new Error('A requested path is not a regular file or directory.');
   return path;
 }
 
@@ -102,28 +100,21 @@ export async function resolveTarget(inputs: Inputs, event: EventContext): Promis
   if (pr && scannedSha !== pr.head.sha) throw new Error('PR scans must check out github.event.pull_request.head.sha, not the merge commit.');
   if (!pr && scannedSha !== event.sha) throw new Error('Checkout HEAD must match GITHUB_SHA. Select the intended branch when dispatching; do not silently check out a different revision.');
   const status = await git(repository, ['status', '--porcelain=v1', '-z', '--untracked-files=normal']);
-  if (inputs.scope !== 'working-tree' && status) throw new Error('The checkout has local changes. Scan a clean checkout, or select scope: working-tree for local changes.');
-  if (inputs.scope === 'working-tree' && pr) throw new Error('working-tree scope cannot be used as a PR security check. Use scope: diff.');
+  if (status) throw new Error('The checkout has local changes. Scan a clean checkout.');
 
   for (const path of inputs.paths) await containedPath(repository, path);
-  if (inputs.scanPromptFile) await containedPath(repository, inputs.scanPromptFile, 'file');
-  if (inputs.validationPromptFile) await containedPath(repository, inputs.validationPromptFile, 'file');
-  for (const path of inputs.knowledgeBase) await containedPath(repository, path);
   let diffBase: string | undefined;
   let diffHead: string | undefined;
-  let workingTreeBase: string | undefined;
   let emptyDiff = false;
   if (inputs.scope === 'diff') {
-    diffHead = await commit(repository, inputs.diffHead || scannedSha);
-    if (diffHead !== scannedSha) throw new Error('diff-head must match the checked-out HEAD.');
+    diffHead = scannedSha;
     if (inputs.diffBase) diffBase = await commit(repository, inputs.diffBase);
     else if (pr) diffBase = (await git(repository, ['merge-base', pr.base.sha, diffHead])).trim();
     else throw new Error('diff-base is required for diff scans outside pull_request events.');
     if (!SHA.test(diffBase)) throw new Error('Could not resolve the diff base. Fetch full history.');
     emptyDiff = !(await git(repository, ['diff', '--no-ext-diff', '--no-textconv', '--name-only', '-z', diffBase, diffHead, '--']));
   }
-  if (inputs.scope === 'working-tree') workingTreeBase = await commit(repository, inputs.workingTreeBase || 'HEAD');
   const analysisRef = pr ? `refs/pull/${pr.number ?? event.payload.number}/head` : event.ref;
-  const publishable = inputs.scope !== 'working-tree' && /^refs\/(heads|tags|pull)\//.test(analysisRef);
-  return { repository, scannedSha, analysisRef: publishable ? analysisRef : '', publishable, emptyDiff, diffBase, diffHead, workingTreeBase };
+  const publishable = /^refs\/(heads|tags|pull)\//.test(analysisRef);
+  return { repository, scannedSha, analysisRef: publishable ? analysisRef : '', publishable, emptyDiff, diffBase, diffHead };
 }
