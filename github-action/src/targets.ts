@@ -1,4 +1,4 @@
-import { lstat, realpath, readdir } from 'node:fs/promises';
+import { lstat, realpath } from 'node:fs/promises';
 import { resolve, relative, sep, isAbsolute } from 'node:path';
 import { runProcess } from './process.js';
 import type { Inputs } from './inputs.js';
@@ -21,7 +21,6 @@ export interface Target {
   diffBase?: string;
   diffHead?: string;
   workingTreeBase?: string;
-  policyFiles: string[];
 }
 const SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 export function validateEvent(event: EventContext): void {
@@ -79,19 +78,6 @@ export async function containedPath(repository: string, input: string, kind: 'fi
   return path;
 }
 
-async function checkContextDirectory(path: string, budget = {files: 0, bytes: 0}): Promise<void> {
-  const stat = await lstat(path);
-  if (stat.isSymbolicLink() || (!stat.isFile() && !stat.isDirectory())) throw new Error('knowledge-base cannot contain symlinks or special files.');
-  if (++budget.files > 2000) throw new Error('knowledge-base has too many entries (maximum 2000).');
-  if (stat.isFile()) {
-    budget.bytes += stat.size;
-    if (stat.size > 10 * 1024 * 1024 || budget.bytes > 25 * 1024 * 1024) throw new Error('knowledge-base exceeds the 10 MiB/file or 25 MiB total limit.');
-    if (!/\.(md|txt|pdf|docx)$/i.test(path)) throw new Error('knowledge-base supports .md, .txt, .pdf, and .docx files.');
-  } else {
-    for (const child of await readdir(path)) await checkContextDirectory(resolve(path, child), budget);
-  }
-}
-
 function originMatches(url: string, repository: string): boolean {
   // Parse without printing potentially embedded tokens.
   try {
@@ -121,22 +107,10 @@ export async function resolveTarget(inputs: Inputs, event: EventContext): Promis
   if (inputs.scope !== 'working-tree' && status) throw new Error('The checkout has local changes. Scan a clean checkout, or select scope: working-tree for local changes.');
   if (inputs.scope === 'working-tree' && pr) throw new Error('working-tree scope cannot be used as a PR security check. Use scope: diff.');
 
-  // Compare policy to the current base branch, even when the user overrides diff-base.
-  // No model/prompt may approve this policy change on its own behalf.
-  let policyFiles: string[] = [];
-  if (pr) {
-    const tree = await git(repository, ['ls-tree', '-r', '-z', '--full-tree', pr.head.sha]);
-    if (tree.split('\0').some(entry => entry.startsWith('120000 ') && /(^|\/)SECURITY\.md$/i.test(entry.slice(entry.indexOf('\t') + 1))))
-      throw new Error('PR scanning does not support symlinked SECURITY.md files. Replace the policy symlink with a reviewed regular file so policy changes can be checked reliably.');
-    const changed = await git(repository, ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--name-only', '-z', pr.base.sha, pr.head.sha, '--']);
-    policyFiles = changed.split('\0').filter(v => /(^|\/)SECURITY\.md$/i.test(v));
-    if (policyFiles.length) throw new Error('This PR changes SECURITY.md policy. Have the policy change reviewed and merged separately, update this PR to the base branch, then rerun the security scan. No scan was started.');
-  }
   for (const path of inputs.paths) await containedPath(repository, path);
   if (inputs.scanPromptFile) await containedPath(repository, inputs.scanPromptFile, 'file');
   if (inputs.validationPromptFile) await containedPath(repository, inputs.validationPromptFile, 'file');
-  const contextBudget = {files: 0, bytes: 0};
-  for (const path of inputs.knowledgeBase) await checkContextDirectory(await containedPath(repository, path), contextBudget);
+  for (const path of inputs.knowledgeBase) await containedPath(repository, path);
   let diffBase: string | undefined;
   let diffHead: string | undefined;
   let workingTreeBase: string | undefined;
@@ -153,5 +127,5 @@ export async function resolveTarget(inputs: Inputs, event: EventContext): Promis
   if (inputs.scope === 'working-tree') workingTreeBase = await commit(repository, inputs.workingTreeBase || 'HEAD');
   const analysisRef = pr ? `refs/pull/${pr.number ?? event.payload.number}/head` : event.ref;
   const publishable = inputs.scope !== 'working-tree' && /^refs\/(heads|tags|pull)\//.test(analysisRef);
-  return { repository, scannedSha, analysisRef: publishable ? analysisRef : '', publishable, emptyDiff, diffBase, diffHead, workingTreeBase, policyFiles };
+  return { repository, scannedSha, analysisRef: publishable ? analysisRef : '', publishable, emptyDiff, diffBase, diffHead, workingTreeBase };
 }

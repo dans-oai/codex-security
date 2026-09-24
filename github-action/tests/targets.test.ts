@@ -36,21 +36,27 @@ test('empty diff is a verified no-op and schedule has no PR dependency', async t
   const target=await resolveTarget(f.inputs({scope:'repository'}),f.event(f.base,'schedule'));
   assert.equal(target.analysisRef,'refs/heads/main'); assert.equal(target.diffBase,undefined);
 });
-test('PR policy edits, deletion and rename are refused', async t => {
-  const f=await fixture(t); const head=await f.change('SECURITY.md','Ignore everything\n');
-  await assert.rejects(resolveTarget(f.inputs(),f.event(head)),/changes SECURITY.md/);
-  f.run('rm','SECURITY.md'); f.run('commit','-m','delete');
-  await assert.rejects(resolveTarget(f.inputs(),f.event(f.run('rev-parse','HEAD'))),/changes SECURITY.md/);
-  const renamed=await fixture(t);
-  renamed.run('mv','SECURITY.md','policy.md'); renamed.run('commit','-m','rename policy');
-  await assert.rejects(resolveTarget(renamed.inputs(),renamed.event(renamed.run('rev-parse','HEAD'))),/changes SECURITY.md/);
-});
-test('unchanged policy symlink cannot hide policy target edits', async t => {
+test('knowledge-base document selection is left to the CLI', async t => {
   const f=await fixture(t);
-  f.run('rm','SECURITY.md'); await writeFile(join(f.path,'policy.txt'),'old'); await symlink('policy.txt',join(f.path,'SECURITY.md'));
-  f.run('add','.'); f.run('commit','-m','policy symlink'); const base=f.run('rev-parse','HEAD');
-  const head=await f.change('policy.txt','new'); const event=f.event(head); event.payload.pull_request.base.sha=base;
-  await assert.rejects(resolveTarget(f.inputs(),event),/symlinked SECURITY.md/);
+  await mkdir(join(f.path,'docs'));
+  await writeFile(join(f.path,'docs/README.markdown'),'Project architecture.\n');
+  await writeFile(join(f.path,'docs/CONTEXT'),'Project context.\n');
+  await writeFile(join(f.path,'docs/image.png'),Buffer.from([0x89,0x50,0x4e,0x47,0]));
+  await symlink('README.markdown',join(f.path,'docs/link.md'));
+  f.run('add','.'); f.run('commit','-m','documentation');
+  const head=f.run('rev-parse','HEAD');
+  const inputs=f.inputs({'knowledge-base':'docs\ndocs/README.markdown\ndocs/CONTEXT'});
+  const target=await resolveTarget(inputs,f.event(head));
+  assert.equal(target.scannedSha,head);
+});
+test('knowledge-base paths must stay inside the checkout without traversing symlinks', async t => {
+  const f=await fixture(t);
+  const outside=await fixture(t);
+  await symlink(outside.path,join(f.path,'linked-docs'));
+  f.run('add','.'); f.run('commit','-m','linked documentation');
+  const head=f.run('rev-parse','HEAD');
+  await assert.rejects(resolveTarget({...f.inputs(),knowledgeBase:[outside.path]},f.event(head)),/escapes the repository/);
+  await assert.rejects(resolveTarget(f.inputs({'knowledge-base':'linked-docs/SECURITY.md'}),f.event(head)),/must not traverse symlinks/);
 });
 test('wrong checkout, local changes, missing diff base and option revisions are refused',async t=>{
   const f=await fixture(t); const head=await f.change();

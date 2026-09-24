@@ -91,8 +91,8 @@ File and line annotations are enabled by default.
 
 Use PR scanning for trusted contributors with branches in the calling repository.
 Fork and Dependabot PRs, `pull_request_target`, and `workflow_run` are not supported.
-PRs that change `SECURITY.md` are also refused; review and merge policy changes
-separately before scanning dependent code changes.
+The scanner uses applicable `SECURITY.md` guidance from the checked-out revision,
+including policy changes in the PR. Review those changes alongside the code.
 
 ## Scan settings
 
@@ -199,7 +199,7 @@ Inputs are strings. Quote booleans and use newline-separated literal paths for l
 | `effort` | `xhigh` | Reasoning effort: minimal, low, medium, high, xhigh, or max (subject to model support). |
 | `max-cost` | Unset | Positive estimated USD stop threshold per invocation. In-flight requests can exceed it; unset means no cost limit. |
 | `fail-on-severity` | `none` | none, low, medium, high, or critical. Scanner/coverage/report failures fail independently. |
-| `knowledge-base` | Unset | Newline-delimited repository-relative .md/.txt/.pdf/.docx context files or directories. No symlinks. |
+| `knowledge-base` | Unset | Newline-delimited repository-relative context files or directories. The CLI selects supported documents; selected paths must not traverse symlinks. |
 | `scan-prompt-file` | Unset | Repository-relative file of additional scan instructions (maximum 1 MiB). |
 | `validation-prompt-file` | Unset | Repository-relative file replacing final validation. Standard mode only (maximum 1 MiB). |
 | `workers` | Unset | Maximum concurrent deep-scan discovery workers (positive integer; deep only). |

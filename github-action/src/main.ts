@@ -144,7 +144,7 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
         core.info('Validating the checkout, scan reports, and coverage.');
         let checkoutError = '';
         try { await resolveTarget(inputs, event); }
-        catch { checkoutError = 'The source checkout or policy changed during scanning. Results cannot establish a completed scan of the requested revision.'; }
+        catch { checkoutError = 'The source checkout changed during scanning. Results cannot establish a completed scan of the requested revision.'; }
         const resultOptions = {resultsDirectory: runtime.resultsDirectory,
           exitCode: interrupted || checkoutError ? 2 : execution.exitCode,
           expected: {scope: inputs.scope, mode: inputs.mode, paths: inputs.paths, scannedSha: target.scannedSha,

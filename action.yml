@@ -33,7 +33,7 @@ inputs:
     description: 'none, low, medium, high, or critical. Scanner/coverage/report failures fail independently.'
     default: none
   knowledge-base:
-    description: Newline-delimited repository-relative .md/.txt/.pdf/.docx context files or directories. No symlinks.
+    description: Newline-delimited repository-relative context files or directories. The CLI selects supported documents; selected paths must not traverse symlinks.
   scan-prompt-file:
     description: Repository-relative file of additional scan instructions (maximum 1 MiB).
   validation-prompt-file:

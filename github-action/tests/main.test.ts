@@ -299,10 +299,12 @@ test('wrong checkout fails before setup or scanner execution', async (t) => {
   assert.equal(result.outputs['scan-status'], 'failed'); assert.equal(result.outputs['sarif-upload-ready'], 'false');
 });
 
-test('PR policy changes fail before setup or spending', async (t) => {
+test('PR policy changes are scanned at the checked-out revision', async (t) => {
   const app = await harness(t, 'policy-pr'); const result = await app.run();
-  assert.equal(result.exitCode, 1); assert.equal(result.setups, 0); assert.equal(result.processes, 0);
-  assert.equal(result.outputs['policy-status'], 'not-evaluated'); assert.match(result.logs, /SECURITY\.md policy/u);
+  assert.equal(result.exitCode, 0); assert.equal(result.setups, 1); assert.equal(result.processes, 1);
+  assert.equal(result.outputs['scan-status'], 'completed');
+  assert.equal(result.outputs['scanned-sha'], app.sha);
+  assert.ok(result.args.includes('--diff')); assert.ok(result.args.includes(app.sha));
 });
 
 test('dry-run is explicitly skipped with no findings policy pass', async (t) => {
@@ -322,7 +324,7 @@ test('changed checkout during scan prevents a completed result', async (t) => {
   const app = await harness(t); app.configure({ mutateCheckout: true }); const result = await app.run();
   assert.equal(result.exitCode, 1); assert.equal(result.outputs['scan-status'], 'failed'); assert.equal(result.outputs['sarif-upload-ready'], 'false');
   assert.ok(result.outputs['json-path']);
-  assert.match(result.logs, /Report diagnostic: The source checkout or policy changed/);
+  assert.match(result.logs, /Report diagnostic: The source checkout changed/);
 });
 
 test('strict export repairs missing best-effort SARIF without model credentials', async (t) => {

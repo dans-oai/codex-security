@@ -31,7 +31,7 @@ export function resultSummary(result: ScanResults, inputs: Inputs, target: Targe
     `**Model:** <code>${esc(inputs.model)}</code> · **Reasoning effort:** ${inputs.effort}`,
     `**Failure threshold:** ${inputs.failOnSeverity === 'none' ? 'report-only findings' : inputs.failOnSeverity + ' and above'}. Scanner, coverage, and required reporting errors fail the action.`,
     ...(inputs.maxCost !== undefined ? [`**Stop threshold:** $${inputs.maxCost} (estimated; in-flight requests can exceed it)`] : []),
-    'Applicable root and nested SECURITY.md policy is discovered by the scanner. PR policy edits are refused before scanning.',
+    'Applicable root and nested SECURITY.md policy is discovered by the scanner.',
   ];
   if (result.scanStatus !== 'completed') parts.push('**Findings below are provisional. This is not a completed scan.**');
   for (const error of result.errors.slice(0, 10)) parts.push(`<pre>${esc(error)}</pre>`);

@@ -25503,7 +25503,7 @@ var require_readdir_glob = __commonJS({
     var { EventEmitter: EventEmitter3 } = require("events");
     var { Minimatch } = require_minimatch();
     var { resolve: resolve6 } = require("path");
-    function readdir4(dir, strict) {
+    function readdir3(dir, strict) {
       return new Promise((resolve7, reject) => {
         fs8.readdir(dir, { withFileTypes: true }, (err, files) => {
           if (err) {
@@ -25560,7 +25560,7 @@ var require_readdir_glob = __commonJS({
       });
     }
     async function* exploreWalkAsync(dir, path4, followSymlinks, useStat, shouldSkip, strict) {
-      let files = await readdir4(path4 + dir, strict);
+      let files = await readdir3(path4 + dir, strict);
       for (const file of files) {
         let name = file.name;
         if (name === void 0) {
@@ -28141,9 +28141,9 @@ var require_graceful_fs = __commonJS({
         }
       }
       var fs$readdir = fs9.readdir;
-      fs9.readdir = readdir4;
+      fs9.readdir = readdir3;
       var noReaddirOptionVersions = /^v[0-5]\./;
-      function readdir4(path4, options, cb) {
+      function readdir3(path4, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
         var go$readdir = noReaddirOptionVersions.test(process.version) ? function go$readdir2(path5, options2, cb2, startTime) {
@@ -55692,18 +55692,6 @@ async function containedPath(repository, input, kind = "either") {
   if (info2.isFile() && kind === "file" && info2.size > 1024 * 1024) throw new Error("Custom prompt files must not exceed 1 MiB.");
   return path4;
 }
-async function checkContextDirectory(path4, budget = { files: 0, bytes: 0 }) {
-  const stat2 = await (0, import_promises.lstat)(path4);
-  if (stat2.isSymbolicLink() || !stat2.isFile() && !stat2.isDirectory()) throw new Error("knowledge-base cannot contain symlinks or special files.");
-  if (++budget.files > 2e3) throw new Error("knowledge-base has too many entries (maximum 2000).");
-  if (stat2.isFile()) {
-    budget.bytes += stat2.size;
-    if (stat2.size > 10 * 1024 * 1024 || budget.bytes > 25 * 1024 * 1024) throw new Error("knowledge-base exceeds the 10 MiB/file or 25 MiB total limit.");
-    if (!/\.(md|txt|pdf|docx)$/i.test(path4)) throw new Error("knowledge-base supports .md, .txt, .pdf, and .docx files.");
-  } else {
-    for (const child of await (0, import_promises.readdir)(path4)) await checkContextDirectory((0, import_node_path2.resolve)(path4, child), budget);
-  }
-}
 function originMatches(url2, repository) {
   try {
     if (url2.startsWith("git@github.com:")) return url2.slice(15).replace(/\.git$/, "") === repository;
@@ -55730,20 +55718,10 @@ async function resolveTarget(inputs, event) {
   const status = await git(repository, ["status", "--porcelain=v1", "-z", "--untracked-files=normal"]);
   if (inputs.scope !== "working-tree" && status) throw new Error("The checkout has local changes. Scan a clean checkout, or select scope: working-tree for local changes.");
   if (inputs.scope === "working-tree" && pr) throw new Error("working-tree scope cannot be used as a PR security check. Use scope: diff.");
-  let policyFiles = [];
-  if (pr) {
-    const tree = await git(repository, ["ls-tree", "-r", "-z", "--full-tree", pr.head.sha]);
-    if (tree.split("\0").some((entry) => entry.startsWith("120000 ") && /(^|\/)SECURITY\.md$/i.test(entry.slice(entry.indexOf("	") + 1))))
-      throw new Error("PR scanning does not support symlinked SECURITY.md files. Replace the policy symlink with a reviewed regular file so policy changes can be checked reliably.");
-    const changed = await git(repository, ["diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--name-only", "-z", pr.base.sha, pr.head.sha, "--"]);
-    policyFiles = changed.split("\0").filter((v) => /(^|\/)SECURITY\.md$/i.test(v));
-    if (policyFiles.length) throw new Error("This PR changes SECURITY.md policy. Have the policy change reviewed and merged separately, update this PR to the base branch, then rerun the security scan. No scan was started.");
-  }
   for (const path4 of inputs.paths) await containedPath(repository, path4);
   if (inputs.scanPromptFile) await containedPath(repository, inputs.scanPromptFile, "file");
   if (inputs.validationPromptFile) await containedPath(repository, inputs.validationPromptFile, "file");
-  const contextBudget = { files: 0, bytes: 0 };
-  for (const path4 of inputs.knowledgeBase) await checkContextDirectory(await containedPath(repository, path4), contextBudget);
+  for (const path4 of inputs.knowledgeBase) await containedPath(repository, path4);
   let diffBase;
   let diffHead;
   let workingTreeBase;
@@ -55760,7 +55738,7 @@ async function resolveTarget(inputs, event) {
   if (inputs.scope === "working-tree") workingTreeBase = await commit(repository, inputs.workingTreeBase || "HEAD");
   const analysisRef = pr ? `refs/pull/${pr.number ?? event.payload.number}/head` : event.ref;
   const publishable = inputs.scope !== "working-tree" && /^refs\/(heads|tags|pull)\//.test(analysisRef);
-  return { repository, scannedSha, analysisRef: publishable ? analysisRef : "", publishable, emptyDiff, diffBase, diffHead, workingTreeBase, policyFiles };
+  return { repository, scannedSha, analysisRef: publishable ? analysisRef : "", publishable, emptyDiff, diffBase, diffHead, workingTreeBase };
 }
 
 // src/runtime.ts
@@ -99212,7 +99190,7 @@ function resultSummary(result, inputs, target, secrets = []) {
     `**Model:** <code>${esc(inputs.model)}</code> \xB7 **Reasoning effort:** ${inputs.effort}`,
     `**Failure threshold:** ${inputs.failOnSeverity === "none" ? "report-only findings" : inputs.failOnSeverity + " and above"}. Scanner, coverage, and required reporting errors fail the action.`,
     ...inputs.maxCost !== void 0 ? [`**Stop threshold:** $${inputs.maxCost} (estimated; in-flight requests can exceed it)`] : [],
-    "Applicable root and nested SECURITY.md policy is discovered by the scanner. PR policy edits are refused before scanning."
+    "Applicable root and nested SECURITY.md policy is discovered by the scanner."
   ];
   if (result.scanStatus !== "completed") parts.push("**Findings below are provisional. This is not a completed scan.**");
   for (const error2 of result.errors.slice(0, 10)) parts.push(`<pre>${esc(error2)}</pre>`);
@@ -99409,7 +99387,7 @@ async function runAction(actionRoot, overrides = {}) {
         try {
           await resolveTarget(inputs, event);
         } catch {
-          checkoutError = "The source checkout or policy changed during scanning. Results cannot establish a completed scan of the requested revision.";
+          checkoutError = "The source checkout changed during scanning. Results cannot establish a completed scan of the requested revision.";
         }
         const resultOptions = {
           resultsDirectory: runtime.resultsDirectory,
