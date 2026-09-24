@@ -51,6 +51,40 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
+  smoke:
+    name: Hosted Action smoke test
+    # Fork PRs are unsupported; their push workflows exercise the Action instead.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - name: Run the packaged Action without credentials or model calls
+        id: smoke
+        uses: ./
+        with:
+          dry-run: 'true'
+      - name: Verify dry-run outputs
+        env:
+          SCAN_STATUS: ${{ steps.smoke.outputs.scan-status }}
+          SKIP_REASON: ${{ steps.smoke.outputs.skip-reason }}
+          EXIT_CODE: ${{ steps.smoke.outputs.exit-code }}
+          SCANNED_SHA: ${{ steps.smoke.outputs.scanned-sha }}
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          SARIF_UPLOAD_READY: ${{ steps.smoke.outputs.sarif-upload-ready }}
+        run: |
+          test "$SCAN_STATUS" = skipped
+          test "$SKIP_REASON" = dry-run
+          test "$EXIT_CODE" = 0
+          test "$SCANNED_SHA" = "$EXPECTED_SHA"
+          test "$SARIF_UPLOAD_READY" = false
+
   dependencies:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
