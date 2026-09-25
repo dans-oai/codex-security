@@ -136,7 +136,7 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
         try { await resolveTarget(inputs, event); }
         catch { checkoutError = 'The source checkout changed during scanning. Results cannot establish a completed scan of the requested revision.'; }
         const resultOptions = {stdout: execution.stdout, resultsDirectory: runtime.resultsDirectory,
-          exitCode: interrupted || checkoutError ? 2 : execution.exitCode,
+          exitCode: execution.exitCode, executionFailed: interrupted || !!checkoutError,
           publishable: target.publishable && !interrupted && !checkoutError};
         let result = await analyzeResults(resultOptions);
         if (result.paths.jsonPath && !result.paths.sarifPath && !interrupted && !checkoutError) {
@@ -174,8 +174,11 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
         for (const error of result.errors.slice(0, 10)) log(`Report diagnostic: ${error}`);
         finalSummary = resultSummary(result, inputs, target, secrets);
         if (inputs.annotations) emitAnnotations(result, secrets);
-        success = result.scanStatus === 'completed' && result.policyStatus === 'passed' && result.reportStatus !== 'failed';
+        success = result.reportStatus !== 'failed' && (result.scanStatus === 'incomplete' ||
+          (result.scanStatus === 'completed' && result.policyStatus === 'passed'));
         finalTitle = resultTitle(result, inputs);
+        if (success && result.scanStatus === 'incomplete')
+          core.warning('Scan coverage is partial. Available findings are provisional; the findings policy was not evaluated. Review the deferred work in the reports.');
       }
     }
   } catch (error) {

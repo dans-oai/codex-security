@@ -19,6 +19,7 @@ export interface ResultOptions {
   stdout: string;
   resultsDirectory: string;
   exitCode: number | null;
+  executionFailed?: boolean;
   publishable: boolean;
   sarifExported?: boolean;
 }
@@ -119,16 +120,25 @@ export async function analyzeResults(options: ResultOptions): Promise<ScanResult
     result.estimatedCost = value.cost.estimatedUsd;
   result.paths = {resultsDirectory: options.resultsDirectory, manifestPath: join(options.resultsDirectory, 'scan-manifest.json'),
     jsonPath: join(options.resultsDirectory, 'findings.json'), coveragePath: join(options.resultsDirectory, 'coverage.json'), sarifPath: ''};
-  if (value.coverage.completeness !== 'complete') {
+  const warnings = (Array.isArray(value.warnings) ? value.warnings : []).filter((warning: unknown): warning is string => typeof warning === 'string');
+  // The CLI includes target-change warnings in result data even when it exits 2.
+  // Those and failed execution must not become warning-only partial scans.
+  if (options.executionFailed || value.manifest.scan.status !== 'completed' || warnings.length > 0) {
+    result.errors.push('CLI did not complete successfully. See the CLI diagnostics.');
+  } else if (value.coverage.completeness === 'partial' && (options.exitCode === 0 || options.exitCode === 2)) {
     result.scanStatus = 'incomplete';
+  } else if (value.coverage.completeness === 'complete' && (options.exitCode === 0 || options.exitCode === 1)) {
+    result.scanStatus = 'completed';
+    result.policyStatus = options.exitCode === 1 ? 'failed' : 'passed';
+  } else result.errors.push(value.coverage.completeness === 'unknown'
+    ? 'CLI could not determine scan coverage. See the CLI diagnostics.'
+    : 'CLI did not complete successfully. See the CLI diagnostics.');
+  if (value.coverage.completeness !== 'complete') {
     for (const item of Array.isArray(value.coverage.deferred) ? value.coverage.deferred : []) if (typeof item?.reason === 'string') result.errors.push(`Deferred work: ${item.reason}`);
     for (const item of Array.isArray(value.coverage.surfaces) ? value.coverage.surfaces : []) if (item?.disposition === 'needs_follow_up' && typeof item.label === 'string')
       result.errors.push(`Needs follow-up: ${item.label}`);
-  } else if (value.manifest.scan.status === 'completed' && (options.exitCode === 0 || options.exitCode === 1)) {
-    result.scanStatus = 'completed';
-    result.policyStatus = options.exitCode === 1 ? 'failed' : 'passed';
-  } else result.errors.push('CLI did not complete successfully. See the CLI diagnostics.');
-  for (const warning of Array.isArray(value.warnings) ? value.warnings : []) if (typeof warning === 'string') result.errors.push(warning);
+  }
+  result.errors.push(...warnings);
   const sarifPath = join(options.resultsDirectory, 'exports/results.sarif');
   if (options.sarifExported || value.sarifPath != null) {
     try {

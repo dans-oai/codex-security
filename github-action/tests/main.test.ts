@@ -86,6 +86,9 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
   let executionExit: number | undefined;
   let scanOutput = '';
   let cliFailure = false;
+  let scanProcess: Partial<ProcessResult> = {};
+  let scanResult: ((value: any) => void) | undefined;
+  let missingReport: string | undefined;
   let incomplete = false;
   let omitSarif = false;
   let mutateCheckout = false;
@@ -128,13 +131,16 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
     await writeFile(manifestPath, JSON.stringify(manifest));
     await writeFile(sarifPath, JSON.stringify(sarif));
     if (omitSarif) await rm(sarifPath);
-    scanOutput = JSON.stringify({manifest, coverage, findings: JSON.parse(await readFile(join(runtime.resultsDirectory, 'findings.json'), 'utf8')),
-      scanDir: runtime.resultsDirectory, sarifPath: omitSarif ? null : sarifPath, cost: {estimatedUsd: 0.125}});
+    const value = {manifest, coverage, findings: JSON.parse(await readFile(join(runtime.resultsDirectory, 'findings.json'), 'utf8')),
+      scanDir: runtime.resultsDirectory, sarifPath: omitSarif ? null : sarifPath, cost: {estimatedUsd: 0.125}};
+    scanResult?.(value);
+    scanOutput = JSON.stringify(value);
+    if (missingReport) await rm(join(runtime.resultsDirectory, missingReport));
   }
   return {
     repository, sha, base, git, runtime,
     setInput: (name: string, value: string) => { process.env[inputKey(name)] = value; },
-    configure: (options: { exitCode?: number; partial?: boolean; missingSarif?: boolean; mutateCheckout?: boolean; exportSucceeds?: boolean; exportThrows?: boolean; exportTimedOut?: boolean; exportSignal?: NodeJS.Signals; cleanupFails?: boolean; cliFailure?: boolean }) => {
+    configure: (options: { exitCode?: number; partial?: boolean; missingSarif?: boolean; mutateCheckout?: boolean; exportSucceeds?: boolean; exportThrows?: boolean; exportTimedOut?: boolean; exportSignal?: NodeJS.Signals; cleanupFails?: boolean; cliFailure?: boolean; scanProcess?: Partial<ProcessResult>; scanResult?: (value: any) => void; missingReport?: string }) => {
       executionExit = options.exitCode ?? executionExit; incomplete = options.partial ?? incomplete;
       omitSarif = options.missingSarif ?? omitSarif; mutateCheckout = options.mutateCheckout ?? mutateCheckout;
       exportSucceeds = options.exportSucceeds ?? exportSucceeds;
@@ -143,6 +149,9 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
       exportSignal = options.exportSignal ?? exportSignal;
       cleanupFails = options.cleanupFails ?? cleanupFails;
       cliFailure = options.cliFailure ?? cliFailure;
+      scanProcess = options.scanProcess ?? scanProcess;
+      scanResult = options.scanResult ?? scanResult;
+      missingReport = options.missingReport ?? missingReport;
     },
     run: async () => {
       const logs: string[] = [];
@@ -168,7 +177,8 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
             if (exporting && exportThrows) throw new Error('Synthetic exporter failure: synthetic-offline-test-key');
             if (exporting && exportSucceeds) { omitSarif = false; await reports(); }
             return { exitCode: exporting ? (exportSucceeds ? 0 : 2) : executionExit ?? (process.env['INPUT_FAIL-ON-SEVERITY'] === 'high' ? 1 : 0), signal: exporting ? exportSignal : null,
-              stdout: cliFailure ? JSON.stringify({status: 'failed', code: 'SCAN_FAILED', message: 'Synthetic API authentication failure.'}) : scanOutput, stderr: '', interrupted: false, timedOut: exporting && exportTimedOut, truncated: false };
+              stdout: cliFailure ? JSON.stringify({status: 'failed', code: 'SCAN_FAILED', message: 'Synthetic API authentication failure.'}) : scanOutput, stderr: '', interrupted: false, timedOut: exporting && exportTimedOut, truncated: false,
+              ...(exporting ? {} : scanProcess) };
           },
         });
         exitCode = process.exitCode;
@@ -327,18 +337,106 @@ test('configuration values in logs are redacted and cannot inject runner command
   assert.match(logs, /\[REDACTED\]/);
 });
 
-test('partial scan fails with provisional findings and no upload eligibility', async (t) => {
+test('partial scan warns with provisional findings and no SARIF upload eligibility', async (t) => {
   const app = await harness(t); app.configure({ exitCode: 2, partial: true, missingSarif: true, exportSucceeds: false }); app.setInput('verbose', 'false');
   const result = await app.run();
-  assert.equal(result.exitCode, 1); assert.equal(result.outputs['scan-status'], 'incomplete');
+  assert.equal(result.exitCode, 0); assert.equal(result.outputs['scan-status'], 'incomplete');
+  assert.equal(result.outputs['exit-code'], '2');
   assert.equal(result.outputs['policy-status'], 'not-evaluated'); assert.equal(result.outputs['sarif-upload-ready'], 'false');
   assert.equal(result.outputs['high-count'], '1'); assert.ok(result.outputs['json-path']);
   assert.match(result.logs, /Provisional findings:/);
-  assert.match(result.logs, /::error::Scan could not complete\. Available findings are provisional\./);
-  assert.match(result.summary, /\*\*Scan could not complete\. Available findings are provisional\.\*\*/);
+  assert.match(result.logs, /::warning::Scan coverage is partial\..*findings policy was not evaluated/);
+  assert.doesNotMatch(result.logs, /::error::/);
+  assert.match(result.summary, /\*\*Scan coverage is partial\. Available findings are provisional\.\*\*/);
   assert.match(result.summary, /Deferred work: Dependency &lt;example&gt; unavailable; validation deferred\./);
   assert.match(result.logs, /Report diagnostic: Deferred work: Dependency <example> unavailable; validation deferred\./);
   assert.doesNotMatch(result.logs, /Synthetic live CLI progress/);
+});
+
+test('partial scans retain reports without evaluating the configured findings threshold', async (t) => {
+  const app = await harness(t);
+  app.configure({exitCode: 2, partial: true}); app.setInput('fail-on-severity', 'high'); app.setInput('upload-artifacts', 'true');
+  let uploadedFiles: string[] = [];
+  t.mock.method(DefaultArtifactClient.prototype, 'uploadArtifact', async (_name: string, files: string[]) => {
+    uploadedFiles = files.map(file => basename(file));
+    return {id: 1, size: 1};
+  });
+  const result = await app.run();
+  assert.equal(result.exitCode, 0); assert.equal(result.outputs['scan-status'], 'incomplete');
+  assert.equal(result.outputs['policy-status'], 'not-evaluated'); assert.equal(result.outputs['sarif-upload-ready'], 'false');
+  assert.equal(result.outputs['high-count'], '1');
+  assert.ok(uploadedFiles.includes('findings.json')); assert.ok(uploadedFiles.includes('coverage.json'));
+  assert.match(result.logs, /::warning::Scan coverage is partial\..*findings policy was not evaluated/);
+  assert.doesNotMatch(result.logs, /::error::/);
+});
+
+for (const [name, scanProcess] of [
+  ['timeout', {timedOut: true}], ['interruption', {interrupted: true}],
+  ['signal', {signal: 'SIGTERM' as const}], ['terminated exit', {exitCode: 143}],
+  ['policy exit', {exitCode: 1}], ['malformed output', {stdout: 'not JSON'}],
+] as const) {
+  test(`partial report cannot hide scan ${name}`, async (t) => {
+    const app = await harness(t); app.configure({exitCode: 2, partial: true, scanProcess});
+    const result = await app.run();
+    assert.equal(result.exitCode, 1); assert.equal(result.outputs['scan-status'], 'failed');
+    assert.equal(result.outputs['policy-status'], 'not-evaluated'); assert.equal(result.outputs['sarif-upload-ready'], 'false');
+    assert.doesNotMatch(result.logs, /::warning::Scan coverage is partial/);
+  });
+}
+
+for (const [name, scanResult] of [
+  ['unknown coverage', (value: any) => { value.coverage.completeness = 'unknown'; }],
+  ['failed manifest', (value: any) => { value.manifest.scan.status = 'failed'; }],
+  ['target-change warning', (value: any) => { value.warnings = ['Synthetic target changed during scanning.']; }],
+] as const) {
+  test(`${name} cannot become a warning-only partial scan`, async (t) => {
+    const app = await harness(t); app.configure({exitCode: 2, partial: true, scanResult});
+    const result = await app.run();
+    assert.equal(result.exitCode, 1); assert.equal(result.outputs['scan-status'], 'failed');
+    assert.equal(result.outputs['policy-status'], 'not-evaluated'); assert.equal(result.outputs['sarif-upload-ready'], 'false');
+  });
+}
+
+test('partial coverage does not hide a changed checkout', async (t) => {
+  const app = await harness(t); app.configure({exitCode: 2, partial: true, mutateCheckout: true});
+  const result = await app.run();
+  assert.equal(result.exitCode, 1); assert.equal(result.outputs['scan-status'], 'failed');
+  assert.match(result.summary, /source checkout changed/);
+});
+
+test('CLI failure remains fatal even with partial reports on disk', async (t) => {
+  const app = await harness(t); app.configure({exitCode: 2, partial: true, cliFailure: true});
+  const result = await app.run();
+  assert.equal(result.exitCode, 1); assert.equal(result.outputs['scan-status'], 'failed');
+  assert.equal(result.outputs['json-path'], '');
+  assert.match(result.summary, /Synthetic API authentication failure/);
+});
+
+for (const missingReport of ['scan-manifest.json', 'findings.json', 'coverage.json']) {
+  test(`partial scan fails when required ${missingReport} is missing without artifact upload`, async (t) => {
+    const app = await harness(t); app.configure({exitCode: 2, partial: true, missingReport});
+    app.setInput('upload-artifacts', 'false');
+    const result = await app.run();
+    assert.equal(result.exitCode, 1); assert.equal(result.outputs['report-status'], 'failed');
+    assert.equal(result.outputs['json-path'], ''); assert.equal(result.outputs['sarif-upload-ready'], 'false');
+    assert.match(result.logs, /required reporting failed/);
+    assert.doesNotMatch(result.logs, /::warning::Scan coverage is partial/);
+  });
+}
+
+test('partial scan does not hide requested artifact upload failure', async (t) => {
+  const app = await harness(t); app.configure({exitCode: 2, partial: true}); app.setInput('upload-artifacts', 'true');
+  t.mock.method(DefaultArtifactClient.prototype, 'uploadArtifact', async () => { throw new Error('Synthetic upload failure'); });
+  const result = await app.run();
+  assert.equal(result.exitCode, 1); assert.equal(result.outputs['report-status'], 'failed');
+  assert.match(result.summary, /Synthetic upload failure/);
+});
+
+test('partial scan does not hide runtime cleanup failure', async (t) => {
+  const app = await harness(t); app.configure({exitCode: 2, partial: true, cleanupFails: true});
+  const result = await app.run();
+  assert.equal(result.exitCode, 1); assert.equal(result.outputs['report-status'], 'failed');
+  assert.match(result.summary, /Runtime cleanup failed/);
 });
 
 test('wrong checkout fails before setup or scanner execution', async (t) => {
