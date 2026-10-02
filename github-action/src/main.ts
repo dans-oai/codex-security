@@ -40,7 +40,7 @@ function outputs(result: ScanResults, target: Target, exitCode: number): void {
     'analysis-ref': target.analysisRef, 'sarif-upload-ready': result.sarifUploadReady,
     'estimated-cost': result.estimatedCost ?? '',
   };
-  for (const [level, count] of Object.entries(result.counts)) values[`${level}-count`] = count;
+  for (const [level, count] of Object.entries(result.counts ?? {})) values[`${level}-count`] = count;
   for (const [key, value] of Object.entries(values)) core.setOutput(key, String(value));
 }
 function elapsed(started: number): string {
@@ -166,7 +166,7 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
         }
         outputs(result, target, execution.exitCode);
         core.info(`Scan: ${result.scanStatus}; findings policy: ${result.policyStatus}; report: ${result.reportStatus}; SARIF upload ready: ${result.sarifUploadReady}.`);
-        core.info(`${result.scanStatus === 'completed' ? 'Findings' : 'Provisional findings'}: ${Object.entries(result.counts).map(([level, count]) => `${level}: ${count}`).join(', ')}.`);
+        core.info(`${result.scanStatus === 'completed' ? 'Findings' : 'Provisional findings'}: ${result.counts ? Object.entries(result.counts).map(([level, count]) => `${level}: ${count}`).join(', ') : 'unavailable'}.`);
         core.info(`Estimated cost: ${result.estimatedCost === undefined ? 'unavailable' : `$${result.estimatedCost.toFixed(4)}`}.`);
         for (const error of result.errors.slice(0, 10)) log(`Report diagnostic: ${error}`);
         finalSummary = resultSummary(result, inputs, target);

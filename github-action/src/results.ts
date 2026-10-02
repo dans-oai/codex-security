@@ -35,7 +35,7 @@ export interface ScanResults {
   policyStatus: PolicyStatus;
   reportStatus: ReportStatus;
   findings: Finding[];
-  counts: Record<Severity, number>;
+  counts?: Record<Severity, number>;
   estimatedCost?: number;
   paths: ResultPaths;
   errors: string[];
@@ -45,8 +45,8 @@ export interface ScanResults {
 const REPORT_FILES = new Set(['scan-manifest.json', 'findings.json', 'coverage.json', 'exports/results.sarif']);
 const LEVELS: readonly Severity[] = ['informational', 'low', 'medium', 'high', 'critical'];
 
-/** Read only owned report files after the scanner exits; never follow links. */
-export async function readReportFile(root: string, name: string): Promise<Buffer> {
+/** Access only owned report files after the scanner exits; never follow links. */
+async function processReportFile(root: string, name: string, adapt?: (bytes: Buffer) => Buffer): Promise<Buffer> {
   if (!REPORT_FILES.has(name)) throw new Error('Unsupported report filename.');
   const absoluteRoot = resolve(root);
   if (await realpath(absoluteRoot) !== absoluteRoot) throw new Error('Report root must be canonical and cannot contain symlinks.');
@@ -62,7 +62,7 @@ export async function readReportFile(root: string, name: string): Promise<Buffer
   const path = join(absoluteRoot, name);
   const before = await lstat(path);
   if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) throw new Error('Report must be a regular file without links.');
-  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  const file = await open(path, (adapt ? constants.O_RDWR : constants.O_RDONLY) | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const opened = await file.stat();
     if (!opened.isFile() || opened.nlink !== 1 || opened.dev !== before.dev || opened.ino !== before.ino) throw new Error('Report changed while opening.');
@@ -70,14 +70,40 @@ export async function readReportFile(root: string, name: string): Promise<Buffer
     const after = await file.stat();
     if (bytes.length !== opened.size || after.size !== opened.size || after.mtimeMs !== opened.mtimeMs || after.ctimeMs !== opened.ctimeMs ||
         await realpath(path) !== path) throw new Error('Report changed while reading.');
-    return bytes;
+    const prepared = adapt ? adapt(bytes) : bytes;
+    if (!prepared.equals(bytes)) {
+      let offset = 0;
+      while (offset < prepared.length) {
+        const { bytesWritten } = await file.write(prepared, offset, prepared.length - offset, offset);
+        if (!bytesWritten) throw new Error('Report could not be rewritten.');
+        offset += bytesWritten;
+      }
+      await file.truncate(prepared.length);
+    }
+    return prepared;
   } finally { await file.close(); }
+}
+
+export async function readReportFile(root: string, name: string): Promise<Buffer> {
+  return processReportFile(root, name);
+}
+
+async function prepareSarif(root: string): Promise<void> {
+  await processReportFile(root, 'exports/results.sarif', (bytes) => {
+    const sarif: unknown = JSON.parse(bytes.toString('utf8'));
+    assertSafeSarif(sarif);
+    // upload-sarif applies its category only when automationDetails is absent.
+    // The CLI's scan UUID must not override the workflow's stable scope category.
+    if (isRecord(sarif) && Array.isArray(sarif.runs)) {
+      for (const run of sarif.runs) if (isRecord(run)) delete run.automationDetails;
+    }
+    return Buffer.from(JSON.stringify(sarif));
+  });
 }
 
 // Consume only the fields needed for GitHub reporting. The CLI owns the report contract.
 export async function analyzeResults(options: ResultOptions): Promise<ScanResults> {
   const result: ScanResults = { scanStatus: 'failed', policyStatus: 'not-evaluated', reportStatus: 'failed', findings: [],
-    counts: { critical: 0, high: 0, medium: 0, low: 0, informational: 0 },
     paths: { resultsDirectory: '', manifestPath: '', jsonPath: '', coveragePath: '', sarifPath: '' }, errors: [],
     sarifUploadReady: false };
   let value: any;
@@ -115,6 +141,7 @@ export async function analyzeResults(options: ResultOptions): Promise<ScanResult
     result.errors.push((error as Error).message);
     return result;
   }
+  result.counts = { critical: 0, high: 0, medium: 0, low: 0, informational: 0 };
   for (const finding of result.findings) result.counts[finding.severity] += 1;
   if (isRecord(value.cost) && typeof value.cost.estimatedUsd === 'number' && Number.isFinite(value.cost.estimatedUsd) && value.cost.estimatedUsd >= 0)
     result.estimatedCost = value.cost.estimatedUsd;
@@ -143,7 +170,7 @@ export async function analyzeResults(options: ResultOptions): Promise<ScanResult
   if (options.sarifExported || value.sarifPath != null) {
     try {
       if (!options.sarifExported && value.sarifPath !== sarifPath) throw new Error('SARIF path is outside the expected report location.');
-      assertSafeSarif(JSON.parse((await readReportFile(options.resultsDirectory, 'exports/results.sarif')).toString('utf8')));
+      await prepareSarif(options.resultsDirectory);
       result.paths.sarifPath = sarifPath;
     } catch { result.errors.push('SARIF report is missing, unsafe, or unreadable.'); }
   }

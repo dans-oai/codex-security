@@ -566,3 +566,26 @@ test('CLI authentication failure is not reported as a findings threshold failure
   assert.match(result.summary, /Synthetic API authentication failure/);
   assert.doesNotMatch(result.logs, /Findings meet the configured failure threshold/);
 });
+
+
+test('unavailable CLI results keep count outputs empty and report unavailable findings', async (t) => {
+  const app = await harness(t); app.configure({cliFailure: true, exitCode: 2});
+  const result = await app.run();
+  for (const level of ['critical', 'high', 'medium', 'low', 'informational']) assert.equal(result.outputs[`${level}-count`], '');
+  assert.match(result.summary, /\*\*Findings:\*\* unavailable/);
+  assert.match(result.logs, /Provisional findings: unavailable/);
+});
+
+test('malformed findings keep count outputs empty', async (t) => {
+  const app = await harness(t); app.configure({scanResult: value => { value.findings.findings[0].severity = null; }});
+  const result = await app.run();
+  assert.equal(result.exitCode, 1);
+  for (const level of ['critical', 'high', 'medium', 'low', 'informational']) assert.equal(result.outputs[`${level}-count`], '');
+});
+
+test('valid empty findings publish zero counts', async (t) => {
+  const app = await harness(t); app.configure({scanResult: value => { value.findings.findings = []; }});
+  const result = await app.run();
+  assert.equal(result.exitCode, 0);
+  for (const level of ['critical', 'high', 'medium', 'low', 'informational']) assert.equal(result.outputs[`${level}-count`], '0');
+});

@@ -8,7 +8,7 @@ export function plain(value: string, limit = 6000): string {
   return text.slice(0, limit);
 }
 function html(value: string): string {
-  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/@/g, '&#64;');
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/@/g, '&#64;').replace(/\r/g, '&#13;').replace(/\n/g, '&#10;');
 }
 export function resultTitle(result: ScanResults, inputs: Inputs): string {
   if (result.scanStatus === 'incomplete') return result.reportStatus === 'failed'
@@ -22,7 +22,7 @@ export function resultTitle(result: ScanResults, inputs: Inputs): string {
 }
 export function resultSummary(result: ScanResults, inputs: Inputs, target: Target): string {
   const esc = (value: string, limit = 4000) => html(plain(value, limit));
-  const counts = Object.entries(result.counts).map(([level, count]) => `${level}: ${count}`).join(' · ');
+  const counts = result.counts ? Object.entries(result.counts).map(([level, count]) => `${level}: ${count}`).join(' · ') : 'unavailable';
   const parts = [
     `**Scan:** ${result.scanStatus} · **Findings policy:** ${result.policyStatus} · **Report:** ${result.reportStatus}`,
     `**Findings:** ${counts}`,

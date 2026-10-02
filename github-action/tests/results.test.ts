@@ -218,6 +218,7 @@ test('missing, malformed and error-only CLI output fails even when report files 
     assert.equal(result.policyStatus, 'not-evaluated');
     assert.equal(result.sarifUploadReady, false);
     assert.ok(result.errors.length > 0);
+    assert.equal(result.counts, undefined);
   }
 });
 
@@ -234,6 +235,7 @@ test('unreadable consumed fields fail instead of publishing misleading counts', 
     assert.equal(result.scanStatus, 'failed');
     assert.equal(result.policyStatus, 'not-evaluated');
     assert.equal(result.sarifUploadReady, false);
+    assert.equal(result.counts, undefined);
   }
 });
 
@@ -304,4 +306,64 @@ test('SARIF publication rejects external references and encoded traversal paths'
     assert.equal(result.paths.sarifPath, '');
     assert.equal(result.sarifUploadReady, false);
   }
+});
+
+
+test('valid empty and partial findings distinguish zero counts from unavailable results', async (t) => {
+  const opts = await fixture(t);
+  change(opts, (value) => { value.findings.findings = []; });
+  assert.deepEqual((await analyzeResults(opts)).counts, {critical: 0, high: 0, medium: 0, low: 0, informational: 0});
+  const partial = await fixture(t);
+  change(partial, (value) => { value.coverage.completeness = 'partial'; });
+  assert.equal((await analyzeResults({...partial, exitCode: 2})).counts?.high, 1);
+});
+
+test('accepted relative path spellings preserve completed findings and SARIF', async (t) => {
+  const opts = await fixture(t);
+  for (const path of ['./src/extract.py', 'src//extract.py']) {
+    change(opts, (value) => { value.findings.findings[0].locations[0].path = path; });
+    await writeFile(join(opts.resultsDirectory, 'exports/results.sarif'), JSON.stringify({runs: [{results: [
+      {locations: [{physicalLocation: {artifactLocation: {uri: path}}}]},
+    ]}]}));
+    const result = await analyzeResults(opts);
+    assert.equal(result.scanStatus, 'completed');
+    assert.equal(result.findings[0]?.path, path);
+    assert.equal(result.counts?.high, 1);
+    assert.equal(result.sarifUploadReady, true);
+  }
+});
+
+test('prepared SARIF lets the uploader set distinct workflow categories', async (t) => {
+  const opts = await fixture(t);
+  const original = JSON.parse(await readFile(join(opts.resultsDirectory, 'exports/results.sarif'), 'utf8'));
+  assert.ok(original.runs[0].automationDetails.id);
+  const result = await analyzeResults(opts);
+  const sarif = JSON.parse(await readFile(result.paths.sarifPath, 'utf8'));
+  const expected = structuredClone(original);
+  for (const run of expected.runs) delete run.automationDetails;
+  assert.deepEqual(sarif, expected);
+  for (const category of ['security/frontend', 'security/backend']) {
+    const upload = structuredClone(sarif);
+    // Match upload-sarif's category precedence: it fills only missing automationDetails.
+    for (const run of upload.runs) {
+      if (run.automationDetails === undefined) run.automationDetails = {id: `${category}/`};
+    }
+    assert.ok(upload.runs.every((run: any) => run.automationDetails.id === `${category}/`));
+  }
+  assert.deepEqual((await collectReports(result)).get('exports/results.sarif'), await readFile(result.paths.sarifPath));
+  assert.equal((await analyzeResults(opts)).sarifUploadReady, true, 'preparation is repeatable');
+});
+
+
+test('SARIF preparation never rewrites linked report files', async (t) => {
+  const opts = await fixture(t);
+  const path = join(opts.resultsDirectory, 'exports/results.sarif');
+  const target = join(opts.resultsDirectory, 'findings.json');
+  const before = await readFile(target);
+  await rm(path); await symlink('../findings.json', path);
+  assert.equal((await analyzeResults(opts)).sarifUploadReady, false);
+  assert.deepEqual(await readFile(target), before);
+  await rm(path); await link(target, path);
+  assert.equal((await analyzeResults(opts)).sarifUploadReady, false);
+  assert.deepEqual(await readFile(target), before);
 });

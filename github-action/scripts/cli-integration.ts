@@ -56,7 +56,11 @@ try {
     assert.equal(result.policyStatus, threshold ? 'failed' : 'passed');
     assert.equal(result.reportStatus, 'ready');
     assert.equal(result.sarifUploadReady, true);
+    const sarif = JSON.parse(await readFile(result.paths.sarifPath, 'utf8'));
+    assert.ok(sarif.runs.every((run: any) => run.automationDetails === undefined),
+      'upload-sarif must be able to apply the workflow category to the real CLI export');
     assert.equal(result.findings.length, cliResult.findings.findings.length);
+    assert.ok(result.counts);
     for (const [level, count] of Object.entries(result.counts)) {
       assert.equal(count, cliResult.findings.findings.filter((finding: any) => finding.severity.level === level).length);
     }

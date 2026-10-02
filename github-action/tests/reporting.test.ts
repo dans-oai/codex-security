@@ -41,3 +41,13 @@ test('partial coverage cannot hide a required reporting failure in the title', (
   assert.match(resultTitle(result, inputs), /coverage is partial, and required reporting failed/i);
   assert.match(resultTitle({...result, scanStatus:'failed'}, inputs), /Scan could not complete/);
 });
+
+
+test('multiline titles remain literal across blank lines without losing diagnostic text', () => {
+  const result = {scanStatus:'completed',policyStatus:'passed',reportStatus:'ready',counts:{critical:0,high:1,medium:0,low:0,informational:0},errors:[],
+    findings:[{severity:'high',title:'Title\n\n![preview](https://example.invalid/image)\r\n\r\n[link](https://example.invalid)',summary:'First line\n\nNext line',path:'src/app.ts',startLine:1}]} as unknown as ScanResults;
+  const summary = resultSummary(result,parseInputs(()=>'', '/checkout'),{repository:'/checkout',scannedSha:'a'.repeat(40),analysisRef:'refs/heads/main',publishable:true,emptyDiff:false});
+  assert.ok(summary.includes('<h3>HIGH: Title&#10;&#10;![preview](https://example.invalid/image)&#13;&#10;&#13;&#10;[link](https://example.invalid)</h3>'));
+  assert.ok(summary.includes('<pre>First line&#10;&#10;Next line</pre>'));
+  assert.doesNotMatch(summary, /<h3>[^]*?\n[^]*?<\/h3>/);
+});

@@ -189,6 +189,8 @@ then add this step after it:
 Complete scans remain uploadable when findings exceed the severity threshold.
 Incomplete scans and dry runs are not uploadable.
 Use a distinct category for each scan scope, such as repository and PR scans.
+The Action removes the CLI scan identifier from SARIF automation details so the
+uploader can apply that category.
 See [GitHub's SARIF upload requirements](https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/integrate-with-existing-tools/upload-sarif-file)
 for code scanning availability and permissions.
 

@@ -6,7 +6,7 @@ export function safeSourcePath(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 &&
     !/[\\\x00-\x1f\x7f]/u.test(value) && !value.startsWith('/') &&
     !/^[a-z][a-z0-9+.-]*:/iu.test(value) &&
-    value.split('/').every((part) => part !== '..' && part !== '' && part !== '.');
+    value.split('/').every((part) => part !== '..');
 }
 
 export function exportSarifArgs(scanDirectory: string, sourceRoot: string, outputPath: string): string[] {

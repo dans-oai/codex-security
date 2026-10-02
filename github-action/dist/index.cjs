@@ -56027,7 +56027,7 @@ function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function safeSourcePath(value) {
-  return typeof value === "string" && value.length > 0 && !/[\\\x00-\x1f\x7f]/u.test(value) && !value.startsWith("/") && !/^[a-z][a-z0-9+.-]*:/iu.test(value) && value.split("/").every((part) => part !== ".." && part !== "" && part !== ".");
+  return typeof value === "string" && value.length > 0 && !/[\\\x00-\x1f\x7f]/u.test(value) && !value.startsWith("/") && !/^[a-z][a-z0-9+.-]*:/iu.test(value) && value.split("/").every((part) => part !== "..");
 }
 function exportSarifArgs(scanDirectory, sourceRoot, outputPath) {
   return ["export", scanDirectory, "--export-format", "sarif", "--source-root", sourceRoot, "--output", outputPath];
@@ -56054,7 +56054,7 @@ function assertSafeSarif(value) {
 // src/results.ts
 var REPORT_FILES = /* @__PURE__ */ new Set(["scan-manifest.json", "findings.json", "coverage.json", "exports/results.sarif"]);
 var LEVELS = ["informational", "low", "medium", "high", "critical"];
-async function readReportFile(root, name) {
+async function processReportFile(root, name, adapt) {
   if (!REPORT_FILES.has(name)) throw new Error("Unsupported report filename.");
   const absoluteRoot = (0, import_node_path4.resolve)(root);
   if (await (0, import_promises3.realpath)(absoluteRoot) !== absoluteRoot) throw new Error("Report root must be canonical and cannot contain symlinks.");
@@ -56070,17 +56070,40 @@ async function readReportFile(root, name) {
   const path6 = (0, import_node_path4.join)(absoluteRoot, name);
   const before = await (0, import_promises3.lstat)(path6);
   if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) throw new Error("Report must be a regular file without links.");
-  const file = await (0, import_promises3.open)(path6, import_node_fs2.constants.O_RDONLY | import_node_fs2.constants.O_NOFOLLOW | import_node_fs2.constants.O_NONBLOCK);
+  const file = await (0, import_promises3.open)(path6, (adapt ? import_node_fs2.constants.O_RDWR : import_node_fs2.constants.O_RDONLY) | import_node_fs2.constants.O_NOFOLLOW | import_node_fs2.constants.O_NONBLOCK);
   try {
     const opened = await file.stat();
     if (!opened.isFile() || opened.nlink !== 1 || opened.dev !== before.dev || opened.ino !== before.ino) throw new Error("Report changed while opening.");
     const bytes = await file.readFile();
     const after = await file.stat();
     if (bytes.length !== opened.size || after.size !== opened.size || after.mtimeMs !== opened.mtimeMs || after.ctimeMs !== opened.ctimeMs || await (0, import_promises3.realpath)(path6) !== path6) throw new Error("Report changed while reading.");
-    return bytes;
+    const prepared = adapt ? adapt(bytes) : bytes;
+    if (!prepared.equals(bytes)) {
+      let offset = 0;
+      while (offset < prepared.length) {
+        const { bytesWritten } = await file.write(prepared, offset, prepared.length - offset, offset);
+        if (!bytesWritten) throw new Error("Report could not be rewritten.");
+        offset += bytesWritten;
+      }
+      await file.truncate(prepared.length);
+    }
+    return prepared;
   } finally {
     await file.close();
   }
+}
+async function readReportFile(root, name) {
+  return processReportFile(root, name);
+}
+async function prepareSarif(root) {
+  await processReportFile(root, "exports/results.sarif", (bytes) => {
+    const sarif = JSON.parse(bytes.toString("utf8"));
+    assertSafeSarif(sarif);
+    if (isRecord(sarif) && Array.isArray(sarif.runs)) {
+      for (const run of sarif.runs) if (isRecord(run)) delete run.automationDetails;
+    }
+    return Buffer.from(JSON.stringify(sarif));
+  });
 }
 async function analyzeResults(options) {
   const result = {
@@ -56088,7 +56111,6 @@ async function analyzeResults(options) {
     policyStatus: "not-evaluated",
     reportStatus: "failed",
     findings: [],
-    counts: { critical: 0, high: 0, medium: 0, low: 0, informational: 0 },
     paths: { resultsDirectory: "", manifestPath: "", jsonPath: "", coveragePath: "", sarifPath: "" },
     errors: [],
     sarifUploadReady: false
@@ -56130,6 +56152,7 @@ async function analyzeResults(options) {
     result.errors.push(error2.message);
     return result;
   }
+  result.counts = { critical: 0, high: 0, medium: 0, low: 0, informational: 0 };
   for (const finding of result.findings) result.counts[finding.severity] += 1;
   if (isRecord(value.cost) && typeof value.cost.estimatedUsd === "number" && Number.isFinite(value.cost.estimatedUsd) && value.cost.estimatedUsd >= 0)
     result.estimatedCost = value.cost.estimatedUsd;
@@ -56159,7 +56182,7 @@ async function analyzeResults(options) {
   if (options.sarifExported || value.sarifPath != null) {
     try {
       if (!options.sarifExported && value.sarifPath !== sarifPath) throw new Error("SARIF path is outside the expected report location.");
-      assertSafeSarif(JSON.parse((await readReportFile(options.resultsDirectory, "exports/results.sarif")).toString("utf8")));
+      await prepareSarif(options.resultsDirectory);
       result.paths.sarifPath = sarifPath;
     } catch {
       result.errors.push("SARIF report is missing, unsafe, or unreadable.");
@@ -99095,7 +99118,7 @@ function plain(value, limit = 6e3) {
   return text.slice(0, limit);
 }
 function html(value) {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/@/g, "&#64;");
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/@/g, "&#64;").replace(/\r/g, "&#13;").replace(/\n/g, "&#10;");
 }
 function resultTitle(result, inputs) {
   if (result.scanStatus === "incomplete") return result.reportStatus === "failed" ? "Scan coverage is partial, and required reporting failed." : "Scan coverage is partial. Available findings are provisional.";
@@ -99107,7 +99130,7 @@ function resultTitle(result, inputs) {
 }
 function resultSummary(result, inputs, target) {
   const esc = (value, limit = 4e3) => html(plain(value, limit));
-  const counts = Object.entries(result.counts).map(([level, count]) => `${level}: ${count}`).join(" \xB7 ");
+  const counts = result.counts ? Object.entries(result.counts).map(([level, count]) => `${level}: ${count}`).join(" \xB7 ") : "unavailable";
   const parts = [
     `**Scan:** ${result.scanStatus} \xB7 **Findings policy:** ${result.policyStatus} \xB7 **Report:** ${result.reportStatus}`,
     `**Findings:** ${counts}`,
@@ -99199,7 +99222,7 @@ function outputs(result, target, exitCode) {
     "sarif-upload-ready": result.sarifUploadReady,
     "estimated-cost": result.estimatedCost ?? ""
   };
-  for (const [level, count] of Object.entries(result.counts)) values[`${level}-count`] = count;
+  for (const [level, count] of Object.entries(result.counts ?? {})) values[`${level}-count`] = count;
   for (const [key, value] of Object.entries(values)) setOutput(key, String(value));
 }
 function elapsed(started) {
@@ -99342,7 +99365,7 @@ async function runAction(actionRoot, overrides = {}) {
         }
         outputs(result, target, execution.exitCode);
         info(`Scan: ${result.scanStatus}; findings policy: ${result.policyStatus}; report: ${result.reportStatus}; SARIF upload ready: ${result.sarifUploadReady}.`);
-        info(`${result.scanStatus === "completed" ? "Findings" : "Provisional findings"}: ${Object.entries(result.counts).map(([level, count]) => `${level}: ${count}`).join(", ")}.`);
+        info(`${result.scanStatus === "completed" ? "Findings" : "Provisional findings"}: ${result.counts ? Object.entries(result.counts).map(([level, count]) => `${level}: ${count}`).join(", ") : "unavailable"}.`);
         info(`Estimated cost: ${result.estimatedCost === void 0 ? "unavailable" : `$${result.estimatedCost.toFixed(4)}`}.`);
         for (const error2 of result.errors.slice(0, 10)) log2(`Report diagnostic: ${error2}`);
         finalSummary = resultSummary(result, inputs, target);
