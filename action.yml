@@ -11,7 +11,7 @@ inputs:
     description: 'repository or diff. Select diff for PR changes only; repository scans the full checkout.'
     default: repository
   paths:
-    description: Newline-delimited literal repository-relative files or folders. Only for repository scope; no globs.
+    description: Newline-delimited literal repository-relative files or folders. Only for repository scope; no glob expansion.
   diff-base:
     description: Diff base revision. Defaults to the PR merge base; required outside PRs when scope is diff.
   mode:

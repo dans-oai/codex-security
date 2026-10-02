@@ -57,8 +57,8 @@ export function parseInputs(read: (name: string) => string, workspace: string): 
   };
   const list = (name: string) => str(name).split(/\r?\n/).map(v => v.trim()).filter(Boolean);
   const safeRelative = (name: string, value: string) => {
-    if (value.startsWith('-') || value.startsWith('/') || /^[A-Za-z]:/.test(value) || value.includes('\\') || value.split('/').includes('..') || /[*?\[\]\x00-\x1f\x7f]/.test(value))
-      throw new Error(`${name} must contain literal repository-relative paths, without globs or '..'.`);
+    if (value.startsWith('-') || value.startsWith('/') || /^[A-Za-z]:/.test(value) || value.includes('\\') || value.split('/').includes('..') || /[\x00-\x1f\x7f]/.test(value))
+      throw new Error(`${name} must contain literal repository-relative paths, without '..'.`);
     return value;
   };
   // Match the CLI's scope spelling before constructing arguments or checking reports.

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, realpath, writeFile, mkdir, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { parseInputs } from '../src/inputs.js';
 import { resolveTarget, validateEvent, git, gitEnvironment, type EventContext } from '../src/targets.js';
 
@@ -92,4 +92,21 @@ test('persisted Git credentials and origin userinfo are refused without revealin
 test('Git failures preserve diagnostic details', async t => {
   const f = await fixture(t);
   await assert.rejects(git(f.path, ['show', 'missing-synthetic-revision']), /unknown revision|ambiguous argument/);
+});
+
+
+test('selected paths require literal filesystem entries without glob expansion', async t => {
+  const f = await fixture(t);
+  const paths = ['src/[slug]/page.tsx', 'src/star*file.ts', 'src/question?file.ts'];
+  for (const path of [...paths, 'src/s/page.tsx', 'src/starOtherfile.ts', 'src/questionXfile.ts']) {
+    await mkdir(dirname(join(f.path, path)), {recursive:true});
+    await writeFile(join(f.path, path), 'export const synthetic = 1;\n');
+  }
+  f.run('add', '.'); f.run('commit', '-m', 'Synthetic literal paths');
+  const head = f.run('rev-parse', 'HEAD');
+  const event = f.event(head, 'schedule');
+  const target = await resolveTarget(f.inputs({scope:'repository', paths:[...paths, 'src/[slug]'].join('\n')}), event);
+  assert.equal(target.scannedSha, head);
+  await assert.rejects(resolveTarget(f.inputs({scope:'repository', paths:'src/[sl]/page.tsx'}), event), /ENOENT/);
+  await assert.rejects(resolveTarget(f.inputs({scope:'repository', paths:'src/*.tsx'}), event), /ENOENT/);
 });

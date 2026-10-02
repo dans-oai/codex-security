@@ -55,9 +55,11 @@ test('numeric and boolean parsing rejects ambiguous or unbounded input', () => {
   for (const value of ['yes','TRUE','1']) assert.throws(() => parse({verbose:value}));
   for (const value of ['0','1.5','91']) assert.throws(() => parse({'retention-days':value}));
 });
-test('path lists accept spaces but reject traversal, globs, and option injection', () => {
+test('path lists accept literal filenames but reject unsafe locations and option injection', () => {
   assert.deepEqual(parse({paths:'src/my folder\nlib'}).paths, ['src/my folder','lib']);
-  for (const paths of ['/etc','../other','src/../../other','src/*','--output-dir','a\\b','C:/other','x\u0000'])
+  assert.deepEqual(parse({paths:'src/[slug]/page.tsx\nsrc/star*file.ts\nsrc/question?file.ts'}).paths,
+    ['src/[slug]/page.tsx', 'src/star*file.ts', 'src/question?file.ts']);
+  for (const paths of ['/etc','../other','src/../../other','--output-dir','a\\b','C:/other','x\u0000'])
     assert.throws(() => parse({paths}));
 });
 test('CLI path arguments use normalized, deduplicated repository-relative paths', () => {

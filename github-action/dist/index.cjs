@@ -55582,8 +55582,8 @@ function parseInputs(read, workspace) {
   };
   const list = (name) => str(name).split(/\r?\n/).map((v) => v.trim()).filter(Boolean);
   const safeRelative = (name, value) => {
-    if (value.startsWith("-") || value.startsWith("/") || /^[A-Za-z]:/.test(value) || value.includes("\\") || value.split("/").includes("..") || /[*?\[\]\x00-\x1f\x7f]/.test(value))
-      throw new Error(`${name} must contain literal repository-relative paths, without globs or '..'.`);
+    if (value.startsWith("-") || value.startsWith("/") || /^[A-Za-z]:/.test(value) || value.includes("\\") || value.split("/").includes("..") || /[\x00-\x1f\x7f]/.test(value))
+      throw new Error(`${name} must contain literal repository-relative paths, without '..'.`);
     return value;
   };
   const paths = [...new Set(list("paths").map((v) => safeRelative("paths", v).split("/").filter((part) => part && part !== ".").join("/") || "."))];

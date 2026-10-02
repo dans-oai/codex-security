@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { parseInputs, scanArguments } from '../src/inputs.js';
 import { analyzeResults } from '../src/results.js';
 import { resolveTool } from '../src/runtime.js';
@@ -90,6 +90,31 @@ try {
   const pathPreflight = JSON.parse(run(pathArguments, 0));
   assert.equal(pathPreflight.dryRun, true);
   assert.deepEqual(pathPreflight.target.paths, ['--help']);
+
+  // Existing glob-shaped filenames are literal scopes, not pathspec expressions.
+  const literalFiles = ['src/[slug]/page.tsx', 'src/star*file.ts', 'src/question?file.ts'];
+  const decoys = ['src/s/page.tsx', 'src/l/page.tsx', 'src/starOtherfile.ts', 'src/questionXfile.ts'];
+  for (const path of [...literalFiles, ...decoys]) {
+    await mkdir(dirname(join(repository, path)), {recursive:true});
+    await writeFile(join(repository, path), 'export const synthetic = 1;\n');
+  }
+  git('add', '.'); git('commit', '-m', 'Synthetic literal path scopes');
+  const scopes = ['src/[slug]', ...literalFiles.slice(1)];
+  const literalInputs: Record<string, string> = {paths: scopes.join('\n'), 'dry-run': 'true'};
+  const python = await resolveTool('python3');
+  const literalArguments = scanArguments(parseInputs(name => literalInputs[name] ?? '', repository),
+    {repository}, join(root, 'literal-results'), python);
+  const literalPreflight = JSON.parse(run(literalArguments, 0));
+  assert.equal(literalPreflight.dryRun, true);
+  assert.deepEqual(literalPreflight.target.paths, scopes);
+  const scopesFile = join(root, 'literal-scopes.json');
+  const sourceInput = join(root, 'literal-source.jsonl');
+  await writeFile(scopesFile, JSON.stringify(scopes));
+  execFileSync(python, [join(cliPackage, '_bundled_plugin/scripts/generate_rank_input.py'),
+    'make-repo-scope-input', '--repo', repository, '--scopes-file', scopesFile, '--out', sourceInput],
+    {cwd: repository, env, stdio: ['ignore', 'pipe', 'pipe']});
+  const selectedFiles = (await readFile(sourceInput, 'utf8')).trim().split('\n').map(row => JSON.parse(row).path).sort();
+  assert.deepEqual(selectedFiles, [...literalFiles].sort(), 'Real scope selection must exclude glob-matching decoys');
 
   // The CLI owns scan validation: an output directory inside the source checkout is forbidden.
   const resultsDirectory = join(repository, 'results');

@@ -112,6 +112,7 @@ The Action defaults to `mode: standard` for repository, selected-path, and diff 
 Keep unrelated credentials and deployment steps in separate jobs.
 
 - Set `paths` to newline-separated files or folders to scan part of a repository.
+  Names such as `src/[slug]/page.tsx` are literal paths; glob characters are not expanded.
   This requires repository scope.
 - For diff scans outside PR events, set `diff-base`.
 - Set `dry-run: 'true'` to check configuration without an API key or model calls.
@@ -257,7 +258,7 @@ Inputs are strings. Quote booleans and use newline-separated literal paths for l
 | --- | --- | --- |
 | `repository` | `${{ github.workspace }}` | Checkout root. Use paths to select folders within the checkout. |
 | `scope` | `repository` | repository or diff. Select diff for PR changes only; repository scans the full checkout. |
-| `paths` | Unset | Newline-delimited literal repository-relative files or folders. Only for repository scope; no globs. |
+| `paths` | Unset | Newline-delimited literal repository-relative files or folders. Only for repository scope; no glob expansion. |
 | `diff-base` | Unset | Diff base revision. Defaults to the PR merge base; required outside PRs when scope is diff. |
 | `mode` | `standard` | standard or deep. Deep supports repository scans, including selected paths; not diff scans. |
 | `model` | `gpt-5.6-sol` | Model with access through your API key. Cost limits require CLI pricing support for the model. |
