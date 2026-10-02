@@ -100,8 +100,12 @@ test('timeout terminates an owned process group', async () => {
   assert.notEqual(result.exitCode, 0);
 });
 
-test('timeout remains unsuccessful when the process handles termination with exit zero', async () => {
-  const result = await runProcess(process.execPath, ['-e', 'process.on("SIGTERM",()=>process.exit(0));setInterval(()=>{},1000)'], { cwd: tmpdir(), env: {}, timeoutMs: 200 });
+test('timeout remains unsuccessful when the process handles termination with exit zero', {timeout:30_000}, async (t) => {
+  t.mock.timers.enable({apis:['setTimeout']});
+  const result = await runProcess(process.execPath, ['-e', 'process.on("SIGTERM",()=>process.exit(0));process.stderr.write("ready\\n");setInterval(()=>{},1000)'], {
+    cwd:tmpdir(), env:{}, timeoutMs:200, signal:t.signal,
+    log:line => { if (line === '[codex-security] ready') t.mock.timers.tick(200); },
+  });
   assert.equal(result.exitCode, 0);
   assert.equal(result.timedOut, true);
 });
