@@ -22,6 +22,16 @@ test('every untrusted physical log line is prefixed and diagnostic text is prese
   assert.ok(!lines.join('').includes('\x1b'));
 });
 
+test('legacy runner command markers are escaped anywhere in a diagnostic', () => {
+  const lines = safeLogLines('##[warning]forged\nSynthetic diagnostic: ##[stop-commands]token\n#\x1b[31m#[add-mask]value');
+  assert.deepEqual(lines, [
+    '[codex-security] ##\\[warning]forged',
+    '[codex-security] Synthetic diagnostic: ##\\[stop-commands]token',
+    '[codex-security] ##\\[add-mask]value',
+  ]);
+  for (const line of lines) assert.ok(!line.includes('##['));
+});
+
 test('credential-shaped diagnostics and encodings survive control normalization', () => {
   const key = 'sk-test/secret+value';
   const forms = [key, Buffer.from(key).toString('base64'), encodeURIComponent(key)];

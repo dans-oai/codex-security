@@ -22,12 +22,13 @@ export interface ProcessResult {
   interrupted: boolean;
 }
 
-/** Prefix every physical line; raw child output must never become runner commands. */
+/** Prefix modern runner commands and escape legacy commands, which match anywhere. */
 export function safeLogLines(value: string): string[] {
   const clean = value.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
     .replace(/\r\n?/g, '\n')
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, '')
-    .replace(/[\u2028\u2029]/g, '\n');
+    .replace(/[\u2028\u2029]/g, '\n')
+    .replace(/##\[/g, '##\\[');
   return clean.split('\n').filter(Boolean).map((line) => `[codex-security] ${line.slice(0, 4096)}`);
 }
 

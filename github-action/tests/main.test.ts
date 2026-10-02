@@ -352,6 +352,18 @@ test('partial scan warns with provisional findings and no SARIF upload eligibili
   assert.doesNotMatch(result.logs, /Synthetic live CLI progress/);
 });
 
+test('partial scan reasons cannot emit legacy runner commands', async (t) => {
+  const app = await harness(t);
+  app.configure({exitCode: 2, partial: true, scanResult: value => {
+    value.coverage.deferred[0].reason = 'Synthetic diagnostic: ##[stop-commands]token';
+  }});
+  const result = await app.run();
+  assert.equal(result.exitCode, 0);
+  assert.match(result.logs, /Synthetic diagnostic: ##\\\[stop-commands\]token/);
+  assert.doesNotMatch(result.logs, /##\[stop-commands\]/);
+  assert.match(result.summary, /Synthetic diagnostic: ##\[stop-commands\]token/);
+});
+
 test('partial scans retain reports without evaluating the configured findings threshold', async (t) => {
   const app = await harness(t);
   app.configure({exitCode: 2, partial: true}); app.setInput('fail-on-severity', 'high'); app.setInput('upload-artifacts', 'true');

@@ -55667,7 +55667,7 @@ var import_node_child_process = require("node:child_process");
 var import_node_path = require("node:path");
 var import_node_string_decoder = require("node:string_decoder");
 function safeLogLines(value) {
-  const clean = value.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, "").replace(/[\u2028\u2029]/g, "\n");
+  const clean = value.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, "").replace(/[\u2028\u2029]/g, "\n").replace(/##\[/g, "##\\[");
   return clean.split("\n").filter(Boolean).map((line) => `[codex-security] ${line.slice(0, 4096)}`);
 }
 async function runProcess(executable, args, options) {
