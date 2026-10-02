@@ -14,7 +14,7 @@ test('finding titles and messages cannot become Markdown links, images or raw HT
   const result = {scanStatus:'completed',policyStatus:'passed',reportStatus:'ready',counts:{critical:0,high:1,medium:0,low:0,informational:0},errors:[],
     findings:[{severity:'high',title:'![click](https://example.invalid) <img src=x> @someone',summary:'</pre><script>bad</script>',path:'src/app.ts',startLine:1}]} as unknown as ScanResults;
   const summary = resultSummary(result,parseInputs(()=>'', '/checkout'),{repository:'/checkout',scannedSha:'a'.repeat(40),analysisRef:'refs/heads/main',publishable:true,emptyDiff:false});
-  assert.ok(summary.includes('<h3>HIGH: ![click](https://example.invalid) &lt;img src=x&gt; &#64;someone</h3>'));
+  assert.ok(summary.includes('<h3>HIGH: !&#91;click&#93;(https://example.invalid) &lt;img src=x&gt; &#64;someone</h3>'));
   assert.ok(summary.includes('&lt;/pre&gt;&lt;script&gt;bad&lt;/script&gt;'));
   assert.ok(!summary.includes('### HIGH:')); assert.ok(!summary.includes('<img'));
 });
@@ -47,7 +47,24 @@ test('multiline titles remain literal across blank lines without losing diagnost
   const result = {scanStatus:'completed',policyStatus:'passed',reportStatus:'ready',counts:{critical:0,high:1,medium:0,low:0,informational:0},errors:[],
     findings:[{severity:'high',title:'Title\n\n![preview](https://example.invalid/image)\r\n\r\n[link](https://example.invalid)',summary:'First line\n\nNext line',path:'src/app.ts',startLine:1}]} as unknown as ScanResults;
   const summary = resultSummary(result,parseInputs(()=>'', '/checkout'),{repository:'/checkout',scannedSha:'a'.repeat(40),analysisRef:'refs/heads/main',publishable:true,emptyDiff:false});
-  assert.ok(summary.includes('<h3>HIGH: Title&#10;&#10;![preview](https://example.invalid/image)&#13;&#10;&#13;&#10;[link](https://example.invalid)</h3>'));
+  assert.ok(summary.includes('<h3>HIGH: Title&#10;&#10;!&#91;preview&#93;(https://example.invalid/image)&#13;&#10;&#13;&#10;&#91;link&#93;(https://example.invalid)</h3>'));
   assert.ok(summary.includes('<pre>First line&#10;&#10;Next line</pre>'));
   assert.doesNotMatch(summary, /<h3>[^]*?\n[^]*?<\/h3>/);
+});
+
+
+test('report fields preserve Markdown punctuation as literal content', () => {
+  const text = '_name_ *bold* [link](https://example.invalid) ![image](https://example.invalid/image) `code` ~~text~~';
+  const escaped = '&#95;name&#95; &#42;bold&#42; &#91;link&#93;(https://example.invalid) !&#91;image&#93;(https://example.invalid/image) &#96;code&#96; &#126;&#126;text&#126;&#126;';
+  const result = {scanStatus:'completed',policyStatus:'passed',reportStatus:'ready',counts:{critical:0,high:1,medium:0,low:0,informational:0},
+    errors:[text],findings:[{severity:'high',title:text,summary:text,path:'pkg/__init__.py',startLine:1},
+      {severity:'high',title:text,summary:text,path:`pkg/${text}`,startLine:2}]} as ScanResults;
+  const inputs = parseInputs(name => name === 'paths' ? 'pkg/__init__.py' : name === 'model' ? text : '', '/checkout');
+  const summary = resultSummary(result,inputs,{repository:'/checkout',scannedSha:'a'.repeat(40),analysisRef:'refs/heads/main',publishable:true,emptyDiff:false});
+  assert.ok(summary.includes(`<h3>HIGH: ${escaped}</h3>`));
+  assert.ok(summary.includes(`<pre>${escaped}</pre>`));
+  assert.ok(summary.includes(`<code>${escaped}</code>`));
+  assert.ok(summary.includes(`<code>pkg/${escaped}:2</code>`));
+  assert.ok(summary.includes('<code>pkg/&#95;&#95;init&#95;&#95;.py</code>'));
+  assert.ok(summary.includes('<code>pkg/&#95;&#95;init&#95;&#95;.py:1</code>'));
 });

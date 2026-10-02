@@ -361,7 +361,7 @@ test('partial scan reasons cannot emit legacy runner commands', async (t) => {
   assert.equal(result.exitCode, 0);
   assert.match(result.logs, /Synthetic diagnostic: ##\\\[stop-commands\]token/);
   assert.doesNotMatch(result.logs, /##\[stop-commands\]/);
-  assert.match(result.summary, /Synthetic diagnostic: ##\[stop-commands\]token/);
+  assert.match(result.summary, /Synthetic diagnostic: ##&#91;stop-commands&#93;token/);
 });
 
 test('partial scans retain reports without evaluating the configured findings threshold', async (t) => {

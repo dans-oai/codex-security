@@ -23,7 +23,7 @@ test('Deep scans forward an explicit discovery budget and selected repository pa
   const args = scanArguments(input, {repository:'/checkout'}, '/results', '/usr/bin/python3');
   assert.equal(args[args.indexOf('--mode') + 1], 'deep');
   assert.equal(args[args.indexOf('--max-time-hours') + 1], '1.5');
-  assert.deepEqual(args.flatMap((arg, index) => arg === '--path' ? [args[index + 1]] : []), ['src', 'lib']);
+  assert.deepEqual(args.filter(arg => arg.startsWith('--path=')).map(arg => arg.slice('--path='.length)), ['src', 'lib']);
 });
 test('Deep scans leave an unset discovery budget to the CLI', () => {
   const input = parse({mode:'deep'});
@@ -64,7 +64,7 @@ test('CLI path arguments use normalized, deduplicated repository-relative paths'
   const input = parse({paths:'./src\nsrc/\nsrc\n./lib//./my folder/\n./\n.'});
   assert.deepEqual(input.paths, ['src', 'lib/my folder', '.']);
   const args = scanArguments(input, {repository:'/checkout'}, '/results', '/usr/bin/python3');
-  assert.deepEqual(args.flatMap((arg, index) => arg === '--path' ? [args[index + 1]] : []), input.paths);
+  assert.deepEqual(args.filter(arg => arg.startsWith('--path=')).map(arg => arg.slice('--path='.length)), input.paths);
 });
 test('model cannot inject a CLI option', () => {
   assert.throws(() => parse({'model':'--plugin-path=evil'}), /not a CLI option/);
@@ -78,7 +78,7 @@ test('CLI arguments preserve literal values and enforce CI policy', () => {
   const args = scanArguments(input, {repository:'/checkout'}, '/private/results', '/usr/bin/python3');
   assert.equal(args[args.indexOf('--provider') + 1], 'openai');
   assert.equal(args[args.indexOf('--auth') + 1], 'api-key');
-  assert.ok(args.includes('model; echo never-execute')); assert.ok(args.includes('src/my folder'));
+  assert.ok(args.includes('model; echo never-execute')); assert.ok(args.includes('--path=src/my folder'));
   assert.ok(!args.some(arg => arg.startsWith('approval_policy=')));
   assert.ok(!args.some(arg => arg.startsWith('approvals_reviewer=')));
   assert.ok(args.includes('analytics.enabled=false'));
@@ -103,4 +103,15 @@ test('report publication and artifact settings remain configurable', () => {
   assert.equal(input.uploadArtifacts, true);
   assert.equal(input.artifactName, 'reports-component');
   assert.equal(input.retentionDays, 14);
+});
+
+
+test('normalized option-shaped paths remain literal CLI values', () => {
+  const input = parse({paths:'./--help\n./--version', 'dry-run':'true'});
+  assert.deepEqual(input.paths, ['--help', '--version']);
+  const args = scanArguments(input, {repository:'/checkout'}, '/results', '/usr/bin/python3');
+  assert.ok(args.includes('--path=--help'));
+  assert.ok(args.includes('--path=--version'));
+  assert.ok(!args.includes('--help'));
+  assert.ok(!args.includes('--version'));
 });

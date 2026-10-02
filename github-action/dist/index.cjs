@@ -55644,7 +55644,7 @@ function scanArguments(inputs, target, resultsDirectory, python) {
     "json"
   ];
   args.push("--codex", "analytics.enabled=false");
-  for (const path6 of inputs.paths) args.push("--path", path6);
+  for (const path6 of inputs.paths) args.push(`--path=${path6}`);
   const options = [
     ["--diff", target.diffBase],
     ["--head", target.diffHead],
@@ -99118,7 +99118,7 @@ function plain(value, limit = 6e3) {
   return text.slice(0, limit);
 }
 function html(value) {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/@/g, "&#64;").replace(/\r/g, "&#13;").replace(/\n/g, "&#10;");
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/@/g, "&#64;").replace(/\r/g, "&#13;").replace(/\n/g, "&#10;").replace(/[\\`*_\[\]~]/g, (character) => `&#${character.charCodeAt(0)};`);
 }
 function resultTitle(result, inputs) {
   if (result.scanStatus === "incomplete") return result.reportStatus === "failed" ? "Scan coverage is partial, and required reporting failed." : "Scan coverage is partial. Available findings are provisional.";

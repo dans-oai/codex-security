@@ -98,7 +98,8 @@ export function scanArguments(inputs: Inputs, target: {repository: string; diffB
   // Preserve the pinned CLI's sandbox and automatic approval-review defaults.
   // Forcing approval_policy="never" prevents recovery from hosted Linux sandbox errors.
   args.push('--codex', 'analytics.enabled=false');
-  for (const path of inputs.paths) args.push('--path', path);
+  // Bind the value so a normalized path beginning with "-" stays a path.
+  for (const path of inputs.paths) args.push(`--path=${path}`);
   const options: Array<[string, string | number | undefined]> = [
     ['--diff', target.diffBase], ['--head', target.diffHead], ['--max-cost', inputs.maxCost],
     ['--max-time-hours', inputs.maxTimeHours],

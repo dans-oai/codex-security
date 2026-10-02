@@ -79,6 +79,18 @@ try {
   assert.equal(deepPreflight.maxTimeHours, 0.25);
   assert.deepEqual(deepPreflight.target.paths, ['example.ts']);
 
+  // Normalization must not let a literal repository path become a framework option.
+  await mkdir(join(repository, '--help'));
+  await writeFile(join(repository, '--help/example.ts'), 'export const example = 1;\n');
+  git('add', '--', '--help/example.ts');
+  git('commit', '-m', 'Synthetic option-shaped path');
+  const pathInputs: Record<string, string> = {paths: './--help', 'dry-run': 'true'};
+  const pathArguments = scanArguments(parseInputs(name => pathInputs[name] ?? '', repository),
+    {repository}, join(root, 'path-results'), await resolveTool('python3'));
+  const pathPreflight = JSON.parse(run(pathArguments, 0));
+  assert.equal(pathPreflight.dryRun, true);
+  assert.deepEqual(pathPreflight.target.paths, ['--help']);
+
   // The CLI owns scan validation: an output directory inside the source checkout is forbidden.
   const resultsDirectory = join(repository, 'results');
   const stdout = run(['scan', repository, '--mock', '--format', 'json', '--output-dir', resultsDirectory], 2);
@@ -89,7 +101,7 @@ try {
   assert.equal(result.policyStatus, 'not-evaluated');
   assert.equal(result.sarifUploadReady, false);
   assert.ok(result.errors.some(error => error.includes(cliError.message)));
-  console.log(`Pinned CLI ${installed.version}: real JSON results, severity exits, SARIF export, Deep Scan preflight, and failures passed without model calls.`);
+  console.log(`Pinned CLI ${installed.version}: real JSON results, severity exits, SARIF export, Deep Scan and literal-path preflights, and failures passed without model calls.`);
 } finally {
   await rm(root, { recursive: true, force: true });
 }

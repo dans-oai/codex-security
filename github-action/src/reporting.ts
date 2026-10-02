@@ -8,7 +8,9 @@ export function plain(value: string, limit = 6000): string {
   return text.slice(0, limit);
 }
 function html(value: string): string {
-  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/@/g, '&#64;').replace(/\r/g, '&#13;').replace(/\n/g, '&#10;');
+  // Inline HTML still parses Markdown; entities keep report fields literal.
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/@/g, '&#64;').replace(/\r/g, '&#13;').replace(/\n/g, '&#10;')
+    .replace(/[\\`*_\[\]~]/g, character => `&#${character.charCodeAt(0)};`);
 }
 export function resultTitle(result: ScanResults, inputs: Inputs): string {
   if (result.scanStatus === 'incomplete') return result.reportStatus === 'failed'
