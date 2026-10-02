@@ -263,7 +263,7 @@ Inputs are strings. Quote booleans and use newline-separated literal paths for l
 | `max-cost` | Unset | Positive estimated USD stop threshold per invocation. In-flight requests can exceed it; unset means no cost limit. |
 | `max-time-hours` | Unset | Positive Deep discovery duration in hours, up to 96. Unset uses the CLI default. Finalization and job timeout are separate. |
 | `fail-on-severity` | `none` | none, low, medium, high, or critical. Applies to complete scans. Valid partial results warn; scanner and required reporting errors fail. |
-| `verbose` | `true` | Stream bounded, credential-redacted CLI diagnostics to the job log. Set false for lifecycle and elapsed-time messages only. |
+| `verbose` | `true` | Stream bounded CLI diagnostics to the job log. Set false for lifecycle and elapsed-time messages only. |
 | `dry-run` | `false` | Validate local configuration without a scan or API key. Does not verify authentication or model access. Use a separate non-required job. |
 | `summary` | `true` | Write a human-readable job summary. |
 | `annotations` | `true` | Emit up to 50 source finding annotations; complete findings remain in reports. |

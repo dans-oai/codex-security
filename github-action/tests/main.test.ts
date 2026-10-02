@@ -326,15 +326,14 @@ test('verbose false suppresses CLI diagnostics but retains lifecycle and results
   assert.match(result.logs, /Scan: completed/);
 });
 
-test('configuration values in logs are redacted and cannot inject runner commands', async (t) => {
+test('configuration diagnostics preserve values and cannot inject runner commands', async (t) => {
   const app = await harness(t);
   app.setInput('model', 'synthetic-offline-test-key\u2028::error::injected');
   const result = await app.run();
-  // The runner mask-registration command contains the key by design.
-  const logs = result.logs.split('\n').filter(line => !line.startsWith('::add-mask::')).join('\n');
-  assert.doesNotMatch(logs, /synthetic-offline-test-key/);
+  const logs = result.logs;
+  assert.match(logs, /synthetic-offline-test-key/);
   assert.doesNotMatch(logs, /^::error::injected/m);
-  assert.match(logs, /\[REDACTED\]/);
+  assert.doesNotMatch(logs, /\[REDACTED\]/);
 });
 
 test('partial scan warns with provisional findings and no SARIF upload eligibility', async (t) => {

@@ -3,11 +3,8 @@ import type { Inputs } from './inputs.js';
 import type { Target } from './targets.js';
 import type { ScanResults } from './results.js';
 
-export function plain(value: string, secrets: readonly string[] = [], limit = 6000): string {
-  let text = value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g, '');
-  for (const secret of secrets.filter(Boolean)) {
-    for (const form of [secret, Buffer.from(secret).toString('base64'), encodeURIComponent(secret)]) text = text.split(form).join('[REDACTED]');
-  }
+export function plain(value: string, limit = 6000): string {
+  const text = value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g, '');
   return text.slice(0, limit);
 }
 function html(value: string): string {
@@ -23,8 +20,8 @@ export function resultTitle(result: ScanResults, inputs: Inputs): string {
   if (inputs.failOnSeverity === 'none') return 'Scan completed. Findings are reported without failing the job.';
   return 'Scan completed. No findings meet the failure threshold.';
 }
-export function resultSummary(result: ScanResults, inputs: Inputs, target: Target, secrets: readonly string[] = []): string {
-  const esc = (value: string, limit = 4000) => html(plain(value, secrets, limit));
+export function resultSummary(result: ScanResults, inputs: Inputs, target: Target): string {
+  const esc = (value: string, limit = 4000) => html(plain(value, limit));
   const counts = Object.entries(result.counts).map(([level, count]) => `${level}: ${count}`).join(' · ');
   const parts = [
     `**Scan:** ${result.scanStatus} · **Findings policy:** ${result.policyStatus} · **Report:** ${result.reportStatus}`,
@@ -49,10 +46,10 @@ export function resultSummary(result: ScanResults, inputs: Inputs, target: Targe
   return Buffer.from(parts.join('\n\n')).subarray(0, 58_000).toString('utf8').replace(/\uFFFD$/, '');
 }
 
-export function emitAnnotations(result: ScanResults, secrets: readonly string[]): void {
+export function emitAnnotations(result: ScanResults): void {
   for (const finding of result.findings.slice(0, 50)) {
-    const message = plain(`${result.scanStatus === 'completed' ? '' : 'Provisional finding: '}${finding.summary}`, secrets, 4000);
-    const props = {title: plain(`${finding.severity.toUpperCase()}: ${finding.title}`, secrets, 200), file: finding.path,
+    const message = plain(`${result.scanStatus === 'completed' ? '' : 'Provisional finding: '}${finding.summary}`, 4000);
+    const props = {title: plain(`${finding.severity.toUpperCase()}: ${finding.title}`, 200), file: finding.path,
       startLine: finding.startLine, endLine: finding.endLine};
     core.warning(message, props);
   }

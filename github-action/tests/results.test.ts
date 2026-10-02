@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { analyzeResults, readReportFile, type ResultOptions } from '../src/results.js';
+import { collectReports } from '../src/artifacts.js';
 import { exportSarifArgs } from '../src/sarif.js';
 
 async function fixture(t: { after(fn: () => Promise<void>): void }): Promise<ResultOptions> {
@@ -51,6 +52,16 @@ test('uses the structured CLI findings instead of reparsing report documents', a
   const result = await analyzeResults(opts);
   assert.equal(result.scanStatus, 'completed');
   assert.equal(result.findings[0]?.title, 'Title from the CLI result');
+});
+
+test('report collection preserves credential-shaped diagnostic content', async (t) => {
+  const opts = await fixture(t);
+  const report = JSON.parse(await readFile(join(opts.resultsDirectory, 'findings.json'), 'utf8'));
+  report.findings[0].summary = 'Synthetic diagnostic: sk-test/secret+value';
+  const bytes = Buffer.from(JSON.stringify(report));
+  await writeFile(join(opts.resultsDirectory, 'findings.json'), bytes);
+  const reports = await collectReports(await analyzeResults(opts));
+  assert.deepEqual(reports.get('findings.json'), bytes);
 });
 
 test('exit 1 preserves completed reports and records the CLI severity-policy failure', async (t) => {

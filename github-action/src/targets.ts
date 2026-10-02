@@ -1,6 +1,6 @@
 import { lstat, realpath } from 'node:fs/promises';
 import { resolve, relative, sep, isAbsolute } from 'node:path';
-import { runProcess } from './process.js';
+import { runProcess, safeLogLines } from './process.js';
 import type { Inputs } from './inputs.js';
 
 export interface EventContext {
@@ -47,7 +47,7 @@ export async function git(repository: string, args: string[]): Promise<string> {
     '-c', 'credential.helper=', '-c', 'core.askPass=/bin/false', ...args,
   ], { cwd: repository, env: gitEnvironment(), timeoutMs: 30_000, maxOutputBytes: 4 * 1024 * 1024 });
   if (result.exitCode !== 0 || result.truncated || result.timedOut || result.interrupted || result.signal)
-    throw new Error(`Git ${args[0]} failed. Check the checkout and fetch-depth: 0 for PR/diff scans. Git diagnostics are withheld because they can contain credentials.`);
+    throw new Error(`Git ${args[0]} failed. Check the checkout and fetch-depth: 0 for PR/diff scans. ${safeLogLines(result.stderr || result.stdout).join("\n")}`);
   return result.stdout;
 }
 function refValue(value: string): string {

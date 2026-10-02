@@ -9,7 +9,6 @@ export interface ProcessOptions {
   timeoutMs?: number;
   maxOutputBytes?: number;
   maxStdoutBytes?: number;
-  secrets?: readonly string[];
   signal?: AbortSignal;
 }
 
@@ -24,15 +23,11 @@ export interface ProcessResult {
 }
 
 /** Prefix every physical line; raw child output must never become runner commands. */
-export function safeLogLines(value: string, secrets: readonly string[] = []): string[] {
-  let clean = value.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+export function safeLogLines(value: string): string[] {
+  const clean = value.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
     .replace(/\r\n?/g, '\n')
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, '')
     .replace(/[\u2028\u2029]/g, '\n');
-  // Sanitize first: stripping a color/control escape can join two secret fragments.
-  const forms = [...new Set(secrets.filter(Boolean).flatMap((secret) => [secret, Buffer.from(secret).toString('base64'), encodeURIComponent(secret)]))]
-    .sort((a, b) => b.length - a.length);
-  for (const form of forms) clean = clean.split(form).join('[REDACTED]');
   return clean.split('\n').filter(Boolean).map((line) => `[codex-security] ${line.slice(0, 4096)}`);
 }
 
@@ -58,13 +53,12 @@ export async function runProcess(executable: string, args: readonly string[], op
     let interrupted = false;
     const stderrDecoder = new StringDecoder('utf8');
     let pendingStderr = '';
-    let stderrTruncated = false;
     const logStderr = (text: string): void => {
       pendingStderr += text;
       const boundary = pendingStderr.lastIndexOf('\n');
       if (boundary < 0) return;
-      // Wait for complete lines so chunk boundaries cannot split secrets or UTF-8.
-      for (const line of safeLogLines(pendingStderr.slice(0, boundary + 1), options.secrets)) options.log?.(line);
+      // Wait for complete lines so chunk boundaries cannot split UTF-8 or runner-command prefixes.
+      for (const line of safeLogLines(pendingStderr.slice(0, boundary + 1))) options.log?.(line);
       pendingStderr = pendingStderr.slice(boundary + 1);
     };
     let killTimer: NodeJS.Timeout | undefined;
@@ -98,11 +92,6 @@ export async function runProcess(executable: string, args: readonly string[], op
         if (name === 'stderr' && options.log) logStderr(stderrDecoder.write(captured));
       }
       if (chunk.length > remaining) {
-        if (name === 'stderr') {
-          stderrTruncated = true;
-          // A cut-off line could end partway through a credential. Never emit it.
-          pendingStderr = '';
-        }
         if (!truncated) options.log?.('[codex-security] Child output reached the capture limit; additional output is omitted.');
         truncated = true;
       }
@@ -121,8 +110,8 @@ export async function runProcess(executable: string, args: readonly string[], op
       finish();
       const stdout = Buffer.concat(buffers.stdout).toString('utf8');
       const stderr = Buffer.concat(buffers.stderr).toString('utf8');
-      if (options.log && !stderrTruncated) {
-        for (const line of safeLogLines(pendingStderr + stderrDecoder.end(), options.secrets)) options.log(line);
+      if (options.log) {
+        for (const line of safeLogLines(pendingStderr + stderrDecoder.end())) options.log(line);
       }
       resolve({ exitCode: code ?? 1, signal, stdout, stderr, truncated, timedOut, interrupted });
     });

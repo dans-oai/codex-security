@@ -5,7 +5,7 @@ import { mkdtemp, realpath, writeFile, mkdir, rm, symlink } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseInputs } from '../src/inputs.js';
-import { resolveTarget, validateEvent, gitEnvironment, type EventContext } from '../src/targets.js';
+import { resolveTarget, validateEvent, git, gitEnvironment, type EventContext } from '../src/targets.js';
 
 async function fixture(t: any) {
   const path = await realpath(await mkdtemp(join(tmpdir(),'action-target-')));
@@ -87,4 +87,9 @@ test('persisted Git credentials and origin userinfo are refused without revealin
   f.run('config','--unset','http.https://github.com/.extraheader');
   f.run('remote','set-url','origin','https://CANARY@github.com/example/repo.git');
   await assert.rejects(resolveTarget(f.inputs(),f.event(f.base)),error=>/origin/.test(String(error))&&!String(error).includes('CANARY'));
+});
+
+test('Git failures preserve diagnostic details', async t => {
+  const f = await fixture(t);
+  await assert.rejects(git(f.path, ['show', 'missing-synthetic-revision']), /unknown revision|ambiguous argument/);
 });

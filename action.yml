@@ -31,7 +31,7 @@ inputs:
     description: 'none, low, medium, high, or critical. Applies to complete scans. Valid partial results warn; scanner and required reporting errors fail.'
     default: none
   verbose:
-    description: Stream bounded, credential-redacted CLI diagnostics to the job log. Set false for lifecycle and elapsed-time messages only.
+    description: Stream bounded CLI diagnostics to the job log. Set false for lifecycle and elapsed-time messages only.
     default: 'true'
   dry-run:
     description: Validate local configuration without a scan or API key. Does not verify authentication or model access. Use a separate non-required job.

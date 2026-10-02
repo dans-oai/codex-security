@@ -14,33 +14,33 @@ test('child receives only supplied environment and literal arguments', async () 
   delete process.env.ACTION_TEST_SECRET;
 });
 
-test('every untrusted physical log line is prefixed and secrets redacted', () => {
-  const lines = safeLogLines('\x1b[31m::error::secret\r::add-mask::other\n::set-output name=x::bad\u2028::warning::text', ['secret']);
+test('every untrusted physical log line is prefixed and diagnostic text is preserved', () => {
+  const lines = safeLogLines('\x1b[31m::error::secret\r::add-mask::other\n::set-output name=x::bad\u2028::warning::text');
   assert.equal(lines.length, 4);
   for (const line of lines) assert.match(line, /^\[codex-security\] /);
-  assert.ok(!lines.join('').includes('secret'));
+  assert.ok(lines.join('').includes('secret'));
   assert.ok(!lines.join('').includes('\x1b'));
 });
 
-test('diagnostic redaction includes common secret encodings after control normalization', () => {
+test('credential-shaped diagnostics and encodings survive control normalization', () => {
   const key = 'sk-test/secret+value';
   const forms = [key, Buffer.from(key).toString('base64'), encodeURIComponent(key)];
   const splitByColor = 'sk-test/\x1b[31msecret+value';
-  const output = safeLogLines([...forms, splitByColor].join('\n'), [key]).join('\n');
-  for (const form of forms) assert.ok(!output.includes(form));
-  assert.equal(output.split('[REDACTED]').length - 1, 4);
+  const output = safeLogLines([...forms, splitByColor].join('\n')).join('\n');
+  for (const form of forms) assert.ok(output.includes(form));
+  assert.ok(!output.includes('[REDACTED]'));
 });
 
 test('process capture is bounded and stderr workflow commands are inert', async () => {
   const logs: string[] = [];
-  const result = await runProcess(process.execPath, ['-e', 'process.stdout.write("a".repeat(20000));process.stderr.write("::error::TOKEN\\n")'], { cwd: tmpdir(), env: {}, maxOutputBytes: 128, secrets: ['TOKEN'], log: (line) => logs.push(line) });
+  const result = await runProcess(process.execPath, ['-e', 'process.stdout.write("a".repeat(20000));process.stderr.write("::error::TOKEN\\n")'], { cwd: tmpdir(), env: {}, maxOutputBytes: 128, log: (line) => logs.push(line) });
   assert.equal(Buffer.byteLength(result.stdout), 128);
   assert.equal(result.truncated, true);
   assert.ok(logs.every((line) => line.startsWith('[codex-security] ')));
-  assert.ok(logs.every((line) => !line.includes('TOKEN')));
+  assert.ok(logs.some((line) => line.includes('TOKEN')));
 });
 
-test('stderr streams before exit with split credentials and UTF-8 safely reassembled', async (t) => {
+test('stderr streams before exit with split diagnostic text and UTF-8 safely reassembled', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'codex-log-test-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const ack = join(root, 'ack');
@@ -62,7 +62,7 @@ test('stderr streams before exit with split credentials and UTF-8 safely reassem
         }, 10);
       }, 20);
     }, 20);
-  `, ack], {cwd: root, env: {}, secrets: ['split-secret'], timeoutMs: 5000, log: line => {
+  `, ack], {cwd: root, env: {}, timeoutMs: 5000, log: line => {
     logs.push(line);
     if (line.includes('ready')) acknowledged = writeFile(ack, 'logged while running');
   }});
@@ -70,18 +70,18 @@ test('stderr streams before exit with split credentials and UTF-8 safely reassem
   assert.equal(result.exitCode, 0);
   assert.equal(result.timedOut, false);
   assert.equal(result.stdout, 'private structured output');
-  assert.deepEqual(logs, ['[codex-security] ::warning::[REDACTED] 🔎 ready', '[codex-security] final line without newline']);
+  assert.deepEqual(logs, ['[codex-security] ::warning::split-secret 🔎 ready', '[codex-security] final line without newline']);
 });
 
-test('capture truncation drops an incomplete credential and logs its limit once', async () => {
+test('capture truncation preserves the captured diagnostic prefix and logs its limit once', async () => {
   const logs: string[] = [];
   const result = await runProcess(process.execPath, ['-e', `
     process.stderr.write('ready\\nsecret-value');
     setTimeout(() => process.stderr.write('more output'), 20);
-  `], {cwd: tmpdir(), env: {}, maxOutputBytes: 12, secrets: ['secret-value'], log: line => logs.push(line)});
+  `], {cwd: tmpdir(), env: {}, maxOutputBytes: 12, log: line => logs.push(line)});
   assert.equal(result.truncated, true);
   assert.equal(Buffer.byteLength(result.stderr), 12);
-  assert.deepEqual(logs, ['[codex-security] ready', '[codex-security] Child output reached the capture limit; additional output is omitted.']);
+  assert.deepEqual(logs, ['[codex-security] ready', '[codex-security] Child output reached the capture limit; additional output is omitted.', '[codex-security] secret']);
 });
 
 test('timeout terminates an owned process group', async () => {

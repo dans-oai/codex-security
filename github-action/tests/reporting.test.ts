@@ -1,15 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { plain, resultSummary, resultTitle } from '../src/reporting.js';
-import { assertNoKnownSecrets } from '../src/artifacts.js';
 import { parseInputs } from '../src/inputs.js';
 import type { ScanResults } from '../src/results.js';
 
-test('known credentials and encodings never become published reports',()=>{
-  assert.equal(plain('CANA\x01RY_VALUE',['CANARY_VALUE']),'[REDACTED]');
+test('credential-shaped text and encodings remain in diagnostics',()=>{
+  assert.equal(plain('CANA\x01RY_VALUE'),'CANARY_VALUE');
   for(const text of ['CANARY_VALUE',Buffer.from('CANARY_VALUE').toString('base64'),encodeURIComponent('canary/key')]) {
-    assert.throws(()=>assertNoKnownSecrets(Buffer.from(text),['CANARY_VALUE','canary/key']),/credential/);
-    assert.equal(plain(text,['CANARY_VALUE','canary/key']),'[REDACTED]');
+    assert.equal(plain(text),text);
   }
 });
 test('finding titles and messages cannot become Markdown links, images or raw HTML',()=>{

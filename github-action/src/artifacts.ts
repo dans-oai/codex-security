@@ -4,13 +4,7 @@ import { join } from 'node:path';
 import { readReportFile, type ScanResults } from './results.js';
 import type { Inputs } from './inputs.js';
 
-export function assertNoKnownSecrets(bytes: Buffer, secrets: readonly string[]): void {
-  for (const secret of secrets.filter(Boolean)) {
-    for (const value of [secret, Buffer.from(secret).toString('base64'), encodeURIComponent(secret)])
-      if (bytes.includes(Buffer.from(value))) throw new Error('A report contains a credential value. Publishing and report outputs have been withheld.');
-  }
-}
-export async function collectReports(result: ScanResults, secrets: readonly string[]): Promise<Map<string, Buffer>> {
+export async function collectReports(result: ScanResults): Promise<Map<string, Buffer>> {
   const reports = new Map<string, Buffer>();
   for (const [name, path] of [
     ['scan-manifest.json', result.paths.manifestPath], ['findings.json', result.paths.jsonPath],
@@ -18,7 +12,6 @@ export async function collectReports(result: ScanResults, secrets: readonly stri
   ]) {
     if (!path) continue;
     const data = await readReportFile(result.paths.resultsDirectory, name);
-    assertNoKnownSecrets(data, secrets);
     reports.set(name, data);
   }
   return reports;

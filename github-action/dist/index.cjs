@@ -24632,6 +24632,8 @@ var require_brace_expansion = __commonJS({
     var escPeriod = "\0PERIOD" + Math.random() + "\0";
     var EXPANSION_MAX = 1e5;
     var EXPANSION_MAX_LENGTH = 4e6;
+    var EXPANSION_MAX_DEPTH = 1e3;
+    var EXPANSION_MAX_REWRITES = 1e3;
     function numeric(str) {
       return parseInt(str, 10) == str ? parseInt(str, 10) : str.charCodeAt(0);
     }
@@ -24641,25 +24643,36 @@ var require_brace_expansion = __commonJS({
     function unescapeBraces(str) {
       return str.split(escSlash).join("\\").split(escOpen).join("{").split(escClose).join("}").split(escComma).join(",").split(escPeriod).join(".");
     }
-    function parseCommaParts(str) {
-      if (!str)
-        return [""];
-      var parts = [];
-      var m = balanced("{", "}", str);
-      if (!m)
-        return str.split(",");
-      var pre = m.pre;
-      var body2 = m.body;
-      var post = m.post;
-      var p = pre.split(",");
-      p[p.length - 1] += "{" + body2 + "}";
-      var postParts = parseCommaParts(post);
-      if (post.length) {
-        p[p.length - 1] += postParts.shift();
-        p.push.apply(p, postParts);
+    function pushAll(target, items) {
+      for (var i = 0; i < items.length; i++) {
+        target.push(items[i]);
       }
-      parts.push.apply(parts, p);
-      return parts;
+    }
+    function parseCommaParts(str) {
+      var parts = [];
+      var carry = "";
+      for (; ; ) {
+        var m = balanced("{", "}", str);
+        if (!m) {
+          var tail = str.split(",");
+          tail[0] = carry + tail[0];
+          pushAll(parts, tail);
+          return parts;
+        }
+        var pre = m.pre;
+        var body2 = m.body;
+        var post = m.post;
+        var p = pre.split(",");
+        p[0] = carry + p[0];
+        p[p.length - 1] += "{" + body2 + "}";
+        if (!post.length) {
+          pushAll(parts, p);
+          return parts;
+        }
+        carry = p.pop();
+        pushAll(parts, p);
+        str = post;
+      }
     }
     function expandTop(str, options) {
       if (!str)
@@ -24667,10 +24680,12 @@ var require_brace_expansion = __commonJS({
       options = options || {};
       var max = options.max == null ? EXPANSION_MAX : options.max;
       var maxLength = options.maxLength == null ? EXPANSION_MAX_LENGTH : options.maxLength;
+      var maxDepth = options.maxDepth == null ? EXPANSION_MAX_DEPTH : options.maxDepth;
+      var maxRewrites = options.maxRewrites == null ? EXPANSION_MAX_REWRITES : options.maxRewrites;
       if (str.substr(0, 2) === "{}") {
         str = "\\{\\}" + str.substr(2);
       }
-      return expand2(escapeBraces(str), max, maxLength, true).map(unescapeBraces);
+      return expand2(escapeBraces(str), max, maxLength, maxDepth, 0, maxRewrites, true).map(unescapeBraces);
     }
     function embrace(str) {
       return "{" + str + "}";
@@ -24744,8 +24759,12 @@ var require_brace_expansion = __commonJS({
       }
       return N;
     }
-    function expand2(str, max, maxLength, isTop) {
+    function expand2(str, max, maxLength, maxDepth, depth, maxRewrites, isTop) {
+      if (depth > maxDepth) {
+        return [str];
+      }
       var acc = [""];
+      var rewrites = 0;
       var dropEmpties = false;
       var firstGroup = true;
       for (; ; ) {
@@ -24773,7 +24792,8 @@ var require_brace_expansion = __commonJS({
         var isSequence = isNumericSequence || isAlphaSequence;
         var isOptions = m.body.indexOf(",") >= 0;
         if (!isSequence && !isOptions) {
-          if (m.post.match(/,(?!,).*\}/)) {
+          if (rewrites < maxRewrites && m.post.match(/,(?!,).*\}/)) {
+            rewrites++;
             str = m.pre + "{" + m.body + escClose + m.post;
             isTop = true;
             continue;
@@ -24797,7 +24817,7 @@ var require_brace_expansion = __commonJS({
         } else {
           var n = parseCommaParts(m.body);
           if (n.length === 1 && n[0] !== void 0) {
-            n = expand2(n[0], max, maxLength, false).map(embrace);
+            n = expand2(n[0], max, maxLength, maxDepth, depth + 1, maxRewrites, false).map(embrace);
             if (n.length === 1) {
               acc = combine(
                 acc,
@@ -24821,7 +24841,7 @@ var require_brace_expansion = __commonJS({
           values = [];
           var valuesLength = 0;
           outer: for (var j = 0; j < n.length; j++) {
-            var expanded = expand2(n[j], max, maxLength, false);
+            var expanded = expand2(n[j], max, maxLength, maxDepth, depth + 1, maxRewrites, false);
             for (var k = 0; k < expanded.length; k++) {
               var v = expanded[k];
               if (dropsEmpties && !v) continue;
@@ -55646,10 +55666,8 @@ var import_node_path2 = require("node:path");
 var import_node_child_process = require("node:child_process");
 var import_node_path = require("node:path");
 var import_node_string_decoder = require("node:string_decoder");
-function safeLogLines(value, secrets = []) {
-  let clean = value.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, "").replace(/[\u2028\u2029]/g, "\n");
-  const forms = [...new Set(secrets.filter(Boolean).flatMap((secret) => [secret, Buffer.from(secret).toString("base64"), encodeURIComponent(secret)]))].sort((a, b) => b.length - a.length);
-  for (const form of forms) clean = clean.split(form).join("[REDACTED]");
+function safeLogLines(value) {
+  const clean = value.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, "").replace(/[\u2028\u2029]/g, "\n");
   return clean.split("\n").filter(Boolean).map((line) => `[codex-security] ${line.slice(0, 4096)}`);
 }
 async function runProcess(executable, args, options) {
@@ -55676,12 +55694,11 @@ async function runProcess(executable, args, options) {
     let interrupted = false;
     const stderrDecoder = new import_node_string_decoder.StringDecoder("utf8");
     let pendingStderr = "";
-    let stderrTruncated = false;
     const logStderr = (text) => {
       pendingStderr += text;
       const boundary = pendingStderr.lastIndexOf("\n");
       if (boundary < 0) return;
-      for (const line of safeLogLines(pendingStderr.slice(0, boundary + 1), options.secrets)) options.log?.(line);
+      for (const line of safeLogLines(pendingStderr.slice(0, boundary + 1))) options.log?.(line);
       pendingStderr = pendingStderr.slice(boundary + 1);
     };
     let killTimer;
@@ -55723,10 +55740,6 @@ async function runProcess(executable, args, options) {
         if (name === "stderr" && options.log) logStderr(stderrDecoder.write(captured));
       }
       if (chunk.length > remaining) {
-        if (name === "stderr") {
-          stderrTruncated = true;
-          pendingStderr = "";
-        }
         if (!truncated) options.log?.("[codex-security] Child output reached the capture limit; additional output is omitted.");
         truncated = true;
       }
@@ -55747,8 +55760,8 @@ async function runProcess(executable, args, options) {
       finish();
       const stdout = Buffer.concat(buffers.stdout).toString("utf8");
       const stderr = Buffer.concat(buffers.stderr).toString("utf8");
-      if (options.log && !stderrTruncated) {
-        for (const line of safeLogLines(pendingStderr + stderrDecoder.end(), options.secrets)) options.log(line);
+      if (options.log) {
+        for (const line of safeLogLines(pendingStderr + stderrDecoder.end())) options.log(line);
       }
       resolve6({ exitCode: code ?? 1, signal, stdout, stderr, truncated, timedOut, interrupted });
     });
@@ -55796,7 +55809,7 @@ async function git(repository, args) {
     ...args
   ], { cwd: repository, env: gitEnvironment(), timeoutMs: 3e4, maxOutputBytes: 4 * 1024 * 1024 });
   if (result.exitCode !== 0 || result.truncated || result.timedOut || result.interrupted || result.signal)
-    throw new Error(`Git ${args[0]} failed. Check the checkout and fetch-depth: 0 for PR/diff scans. Git diagnostics are withheld because they can contain credentials.`);
+    throw new Error(`Git ${args[0]} failed. Check the checkout and fetch-depth: 0 for PR/diff scans. ${safeLogLines(result.stderr || result.stdout).join("\n")}`);
   return result.stdout;
 }
 function refValue(value) {
@@ -99045,13 +99058,7 @@ var client = new DefaultArtifactClient();
 // src/artifacts.ts
 var import_promises7 = require("node:fs/promises");
 var import_node_path5 = require("node:path");
-function assertNoKnownSecrets(bytes, secrets) {
-  for (const secret of secrets.filter(Boolean)) {
-    for (const value of [secret, Buffer.from(secret).toString("base64"), encodeURIComponent(secret)])
-      if (bytes.includes(Buffer.from(value))) throw new Error("A report contains a credential value. Publishing and report outputs have been withheld.");
-  }
-}
-async function collectReports(result, secrets) {
+async function collectReports(result) {
   const reports = /* @__PURE__ */ new Map();
   for (const [name, path6] of [
     ["scan-manifest.json", result.paths.manifestPath],
@@ -99061,7 +99068,6 @@ async function collectReports(result, secrets) {
   ]) {
     if (!path6) continue;
     const data = await readReportFile(result.paths.resultsDirectory, name);
-    assertNoKnownSecrets(data, secrets);
     reports.set(name, data);
   }
   return reports;
@@ -99084,11 +99090,8 @@ async function uploadReports(reports, inputs, tempRoot) {
 }
 
 // src/reporting.ts
-function plain(value, secrets = [], limit = 6e3) {
-  let text = value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g, "");
-  for (const secret of secrets.filter(Boolean)) {
-    for (const form of [secret, Buffer.from(secret).toString("base64"), encodeURIComponent(secret)]) text = text.split(form).join("[REDACTED]");
-  }
+function plain(value, limit = 6e3) {
+  const text = value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g, "");
   return text.slice(0, limit);
 }
 function html(value) {
@@ -99102,8 +99105,8 @@ function resultTitle(result, inputs) {
   if (inputs.failOnSeverity === "none") return "Scan completed. Findings are reported without failing the job.";
   return "Scan completed. No findings meet the failure threshold.";
 }
-function resultSummary(result, inputs, target, secrets = []) {
-  const esc = (value, limit = 4e3) => html(plain(value, secrets, limit));
+function resultSummary(result, inputs, target) {
+  const esc = (value, limit = 4e3) => html(plain(value, limit));
   const counts = Object.entries(result.counts).map(([level, count]) => `${level}: ${count}`).join(" \xB7 ");
   const parts = [
     `**Scan:** ${result.scanStatus} \xB7 **Findings policy:** ${result.policyStatus} \xB7 **Report:** ${result.reportStatus}`,
@@ -99130,11 +99133,11 @@ function resultSummary(result, inputs, target, secrets = []) {
   parts.push("Use the action outputs for full JSON, coverage, and SARIF. Upload SARIF only when sarif-upload-ready is true. Reports can contain source code and vulnerability details.");
   return Buffer.from(parts.join("\n\n")).subarray(0, 58e3).toString("utf8").replace(/\uFFFD$/, "");
 }
-function emitAnnotations(result, secrets) {
+function emitAnnotations(result) {
   for (const finding of result.findings.slice(0, 50)) {
-    const message = plain(`${result.scanStatus === "completed" ? "" : "Provisional finding: "}${finding.summary}`, secrets, 4e3);
+    const message = plain(`${result.scanStatus === "completed" ? "" : "Provisional finding: "}${finding.summary}`, 4e3);
     const props = {
-      title: plain(`${finding.severity.toUpperCase()}: ${finding.title}`, secrets, 200),
+      title: plain(`${finding.severity.toUpperCase()}: ${finding.title}`, 200),
       file: finding.path,
       startLine: finding.startLine,
       endLine: finding.endLine
@@ -99214,7 +99217,6 @@ async function runAction(actionRoot, overrides = {}) {
   let target;
   let runtime;
   let tempRoot = "";
-  let secrets = [];
   let success = false;
   let finalSummary = "";
   let finalTitle = "Scan could not complete.";
@@ -99225,8 +99227,6 @@ async function runAction(actionRoot, overrides = {}) {
   setOutput("sarif-upload-ready", "false");
   try {
     const apiKey = process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY || "";
-    secrets = [apiKey].filter(Boolean);
-    for (const secret of secrets) setSecret(secret);
     inputs = parseInputs((name) => getInput(name), process.env.GITHUB_WORKSPACE ?? "");
     const event = await context5();
     validateEvent(event);
@@ -99258,7 +99258,7 @@ async function runAction(actionRoot, overrides = {}) {
       saveState("runtime-temp-root", tempRoot);
       const args = scanArguments(inputs, target, runtime.resultsDirectory, runtime.pythonPath);
       const log2 = (message) => {
-        for (const line of safeLogLines(message, secrets)) info(line);
+        for (const line of safeLogLines(message)) info(line);
       };
       log2(`Target commit: ${target.scannedSha}.${target.diffBase ? ` Diff: ${target.diffBase}..${target.diffHead}.` : ""}`);
       if (inputs.paths.length) log2(`Paths: ${inputs.paths.join(", ")}.`);
@@ -99275,8 +99275,7 @@ async function runAction(actionRoot, overrides = {}) {
           timeoutMs: 6 * 60 * 60 * 1e3,
           maxOutputBytes: 4 * 1024 * 1024,
           maxStdoutBytes: Infinity,
-          secrets,
-          // Stream bounded, sanitized stderr; structured stdout stays private.
+          // Stream bounded stderr with terminal controls escaped; structured stdout stays private.
           log: inputs.verbose ? info : void 0
         });
       } finally {
@@ -99286,7 +99285,7 @@ async function runAction(actionRoot, overrides = {}) {
       setOutput("exit-code", String(execution.exitCode));
       const interrupted = execution.interrupted || execution.timedOut || !!execution.signal;
       if (inputs.dryRun) {
-        if (execution.exitCode !== 0 || interrupted) throw new Error(`CLI configuration validation failed. ${inputs.verbose ? "See the CLI diagnostics above." : "Set verbose: true for bounded, redacted diagnostics."}`);
+        if (execution.exitCode !== 0 || interrupted) throw new Error(`CLI configuration validation failed. ${inputs.verbose ? "See the CLI diagnostics above." : "Set verbose: true for bounded diagnostics."}`);
         setOutput("scan-status", "skipped");
         setOutput("skip-reason", "dry-run");
         setOutput("report-status", "ready");
@@ -99317,7 +99316,6 @@ async function runAction(actionRoot, overrides = {}) {
               cwd: target.repository,
               env: runtimeEnvironment(runtime),
               timeoutMs: 6e4,
-              secrets,
               log: inputs.verbose ? info : void 0
             });
             if (exported.exitCode === 0 && !exported.interrupted && !exported.timedOut && !exported.signal)
@@ -99331,7 +99329,7 @@ async function runAction(actionRoot, overrides = {}) {
         if (checkoutError) result.errors.unshift(checkoutError);
         if (interrupted) result.errors.unshift("Scan was interrupted or exceeded its execution limit. Available findings are provisional.");
         try {
-          const reports = await collectReports(result, secrets);
+          const reports = await collectReports(result);
           if (inputs.uploadArtifacts) {
             info("Uploading validated report artifacts.");
             await uploadReports(reports, inputs, tempRoot);
@@ -99339,7 +99337,7 @@ async function runAction(actionRoot, overrides = {}) {
         } catch (error2) {
           result.reportStatus = "failed";
           result.sarifUploadReady = false;
-          result.errors.push(plain(error2 instanceof Error ? error2.message : "Report publication failed.", secrets));
+          result.errors.push(plain(error2 instanceof Error ? error2.message : "Report publication failed."));
           result.paths = { resultsDirectory: "", manifestPath: "", jsonPath: "", coveragePath: "", sarifPath: "" };
         }
         outputs(result, target, execution.exitCode);
@@ -99347,8 +99345,8 @@ async function runAction(actionRoot, overrides = {}) {
         info(`${result.scanStatus === "completed" ? "Findings" : "Provisional findings"}: ${Object.entries(result.counts).map(([level, count]) => `${level}: ${count}`).join(", ")}.`);
         info(`Estimated cost: ${result.estimatedCost === void 0 ? "unavailable" : `$${result.estimatedCost.toFixed(4)}`}.`);
         for (const error2 of result.errors.slice(0, 10)) log2(`Report diagnostic: ${error2}`);
-        finalSummary = resultSummary(result, inputs, target, secrets);
-        if (inputs.annotations) emitAnnotations(result, secrets);
+        finalSummary = resultSummary(result, inputs, target);
+        if (inputs.annotations) emitAnnotations(result);
         success = result.reportStatus !== "failed" && (result.scanStatus === "incomplete" || result.scanStatus === "completed" && result.policyStatus === "passed");
         finalTitle = resultTitle(result, inputs);
         if (success && result.scanStatus === "incomplete")
@@ -99356,7 +99354,7 @@ async function runAction(actionRoot, overrides = {}) {
       }
     }
   } catch (error2) {
-    const message = plain(error2 instanceof Error ? error2.message : "Unexpected action failure.", secrets, 2e3);
+    const message = plain(error2 instanceof Error ? error2.message : "Unexpected action failure.", 2e3);
     finalSummary = `<pre>${message.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/@/g, "&#64;")}</pre>`;
     setOutput("sarif-upload-ready", "false");
     error(message);

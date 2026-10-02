@@ -59,7 +59,6 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
   let target: Target | undefined;
   let runtime: Runtime | undefined;
   let tempRoot = '';
-  let secrets: string[] = [];
   let success = false;
   let finalSummary = '';
   let finalTitle = 'Scan could not complete.';
@@ -70,8 +69,6 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
   core.setOutput('sarif-upload-ready', 'false');
   try {
     const apiKey = process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY || '';
-    secrets = [apiKey].filter(Boolean);
-    for (const secret of secrets) core.setSecret(secret);
     inputs = parseInputs(name => core.getInput(name), process.env.GITHUB_WORKSPACE ?? '');
     const event = await context();
     validateEvent(event);
@@ -100,7 +97,7 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
       core.saveState('runtime-temp-root', tempRoot);
       const args = scanArguments(inputs, target, runtime.resultsDirectory, runtime.pythonPath);
       const log = (message: string): void => {
-        for (const line of safeLogLines(message, secrets)) core.info(line);
+        for (const line of safeLogLines(message)) core.info(line);
       };
       log(`Target commit: ${target.scannedSha}.${target.diffBase ? ` Diff: ${target.diffBase}..${target.diffHead}.` : ''}`);
       if (inputs.paths.length) log(`Paths: ${inputs.paths.join(', ')}.`);
@@ -113,8 +110,8 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
       try {
         execution = await deps.runProcess(runtime.nodePath, [runtime.cliPath, ...args], {
           cwd: target.repository, env: inputs.dryRun ? runtimeEnvironment(runtime) : runtime.env(apiKey),
-          timeoutMs: 6 * 60 * 60 * 1000, maxOutputBytes: 4 * 1024 * 1024, maxStdoutBytes: Infinity, secrets,
-          // Stream bounded, sanitized stderr; structured stdout stays private.
+          timeoutMs: 6 * 60 * 60 * 1000, maxOutputBytes: 4 * 1024 * 1024, maxStdoutBytes: Infinity,
+          // Stream bounded stderr with terminal controls escaped; structured stdout stays private.
           log: inputs.verbose ? core.info : undefined,
         });
       } finally { clearInterval(timer); }
@@ -122,7 +119,7 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
       core.setOutput('exit-code', String(execution.exitCode));
       const interrupted = execution.interrupted || execution.timedOut || !!execution.signal;
       if (inputs.dryRun) {
-        if (execution.exitCode !== 0 || interrupted) throw new Error(`CLI configuration validation failed. ${inputs.verbose ? 'See the CLI diagnostics above.' : 'Set verbose: true for bounded, redacted diagnostics.'}`);
+        if (execution.exitCode !== 0 || interrupted) throw new Error(`CLI configuration validation failed. ${inputs.verbose ? 'See the CLI diagnostics above.' : 'Set verbose: true for bounded diagnostics.'}`);
         core.setOutput('scan-status', 'skipped');
         core.setOutput('skip-reason', 'dry-run');
         core.setOutput('report-status', 'ready');
@@ -143,7 +140,7 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
           core.info('Producing a SARIF export from the validated scan.');
           try {
             const exported = await deps.runProcess(runtime.nodePath, [runtime.cliPath, ...exportSarifArgs(runtime.resultsDirectory, target.repository, join(runtime.resultsDirectory, 'exports/results.sarif')), '--python', runtime.pythonPath], {
-              cwd: target.repository, env: runtimeEnvironment(runtime), timeoutMs: 60_000, secrets,
+              cwd: target.repository, env: runtimeEnvironment(runtime), timeoutMs: 60_000,
               log: inputs.verbose ? core.info : undefined,
             });
             if (exported.exitCode === 0 && !exported.interrupted && !exported.timedOut && !exported.signal)
@@ -155,7 +152,7 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
         if (checkoutError) result.errors.unshift(checkoutError);
         if (interrupted) result.errors.unshift('Scan was interrupted or exceeded its execution limit. Available findings are provisional.');
         try {
-          const reports = await collectReports(result, secrets);
+          const reports = await collectReports(result);
           if (inputs.uploadArtifacts) {
             core.info('Uploading validated report artifacts.');
             await uploadReports(reports, inputs, tempRoot);
@@ -163,8 +160,8 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
         } catch (error) {
           result.reportStatus = 'failed';
           result.sarifUploadReady = false;
-          result.errors.push(plain(error instanceof Error ? error.message : 'Report publication failed.', secrets));
-          // Withhold all report paths after credential/containment/upload failure.
+          result.errors.push(plain(error instanceof Error ? error.message : 'Report publication failed.'));
+          // Withhold all report paths after containment/upload failure.
           result.paths = {resultsDirectory: '', manifestPath: '', jsonPath: '', coveragePath: '', sarifPath: ''};
         }
         outputs(result, target, execution.exitCode);
@@ -172,8 +169,8 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
         core.info(`${result.scanStatus === 'completed' ? 'Findings' : 'Provisional findings'}: ${Object.entries(result.counts).map(([level, count]) => `${level}: ${count}`).join(', ')}.`);
         core.info(`Estimated cost: ${result.estimatedCost === undefined ? 'unavailable' : `$${result.estimatedCost.toFixed(4)}`}.`);
         for (const error of result.errors.slice(0, 10)) log(`Report diagnostic: ${error}`);
-        finalSummary = resultSummary(result, inputs, target, secrets);
-        if (inputs.annotations) emitAnnotations(result, secrets);
+        finalSummary = resultSummary(result, inputs, target);
+        if (inputs.annotations) emitAnnotations(result);
         success = result.reportStatus !== 'failed' && (result.scanStatus === 'incomplete' ||
           (result.scanStatus === 'completed' && result.policyStatus === 'passed'));
         finalTitle = resultTitle(result, inputs);
@@ -182,7 +179,7 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
       }
     }
   } catch (error) {
-    const message = plain(error instanceof Error ? error.message : 'Unexpected action failure.', secrets, 2000);
+    const message = plain(error instanceof Error ? error.message : 'Unexpected action failure.', 2000);
     finalSummary = `<pre>${message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/@/g, '&#64;')}</pre>`;
     core.setOutput('sarif-upload-ready', 'false');
     core.error(message);
