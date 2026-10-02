@@ -1,6 +1,6 @@
 import { lstat, realpath } from 'node:fs/promises';
 import { resolve, relative, sep, isAbsolute } from 'node:path';
-import { runProcess, safeLogLines } from './process.js';
+import { runProcess, safeLogLines, type ProcessResult } from './process.js';
 import type { Inputs } from './inputs.js';
 
 export interface EventContext {
@@ -41,14 +41,17 @@ export function gitEnvironment(): NodeJS.ProcessEnv {
     GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0',
   };
 }
-export async function git(repository: string, args: string[]): Promise<string> {
+async function gitResult(repository: string, args: string[], acceptedExitCodes = [0]): Promise<ProcessResult> {
   const result = await runProcess('/usr/bin/git', [
     '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'core.untrackedCache=false',
     '-c', 'credential.helper=', '-c', 'core.askPass=/bin/false', ...args,
   ], { cwd: repository, env: gitEnvironment(), timeoutMs: 30_000, maxOutputBytes: 4 * 1024 * 1024 });
-  if (result.exitCode !== 0 || result.truncated || result.timedOut || result.interrupted || result.signal)
+  if (!acceptedExitCodes.includes(result.exitCode) || result.truncated || result.timedOut || result.interrupted || result.signal)
     throw new Error(`Git ${args[0]} failed. Check the checkout and fetch-depth: 0 for PR/diff scans. ${safeLogLines(result.stderr || result.stdout).join("\n")}`);
-  return result.stdout;
+  return result;
+}
+export async function git(repository: string, args: string[]): Promise<string> {
+  return (await gitResult(repository, args)).stdout;
 }
 function refValue(value: string): string {
   if (!value || value.length > 1024 || value.startsWith('-') || /[\x00-\x20\x7f]/.test(value)) throw new Error('Git revision must be a commit or ref, not an option or expression containing whitespace.');
@@ -112,7 +115,7 @@ export async function resolveTarget(inputs: Inputs, event: EventContext): Promis
     else if (pr) diffBase = (await git(repository, ['merge-base', pr.base.sha, diffHead])).trim();
     else throw new Error('diff-base is required for diff scans outside pull_request events.');
     if (!SHA.test(diffBase)) throw new Error('Could not resolve the diff base. Fetch full history.');
-    emptyDiff = !(await git(repository, ['diff', '--no-ext-diff', '--no-textconv', '--name-only', '-z', diffBase, diffHead, '--']));
+    emptyDiff = (await gitResult(repository, ['diff', '--no-ext-diff', '--no-textconv', '--quiet', diffBase, diffHead, '--'], [0, 1])).exitCode === 0;
   }
   const analysisRef = pr ? `refs/pull/${pr.number ?? event.payload.number}/head` : event.ref;
   const publishable = /^refs\/(heads|tags|pull)\//.test(analysisRef);

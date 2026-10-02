@@ -43,6 +43,27 @@ test('manual diff scans resolve an explicit base against the checked-out head', 
   assert.equal(target.diffBase,f.base); assert.equal(target.diffHead,head);
   assert.equal(target.scannedSha,head); assert.equal(target.emptyDiff,false);
 });
+test('large diffs are nonempty without collecting every changed pathname', async t => {
+  const f = await fixture(t);
+  const blob = f.run('rev-parse', `${f.base}:src/app.ts`);
+  const entries = Array.from({length:20_000}, (_, index) =>
+    `100644 blob ${blob}\tsrc-${String(index).padStart(5, '0')}-${'x'.repeat(210)}.ts\n`).join('');
+  const tree = execFileSync('/usr/bin/git', ['mktree'], {
+    cwd:f.path, env:gitEnvironment(), input:entries, encoding:'utf8',
+  }).trim();
+  const base = f.run('commit-tree', tree, '-p', f.base, '-m', 'Synthetic large diff base');
+  const head = f.run('commit-tree', f.run('rev-parse', `${f.base}^{tree}`), '-p', base, '-m', 'Synthetic large diff head');
+  f.run('reset', '--hard', head);
+  for (const eventName of ['pull_request', 'workflow_dispatch']) {
+    const event = f.event(head, eventName);
+    event.payload.pull_request.base.sha = base;
+    const inputs = f.inputs(eventName === 'pull_request' ? {scope:'diff'} : {scope:'diff', 'diff-base':base});
+    const target = await resolveTarget(inputs, event);
+    assert.equal(target.diffBase, base);
+    assert.equal(target.diffHead, head);
+    assert.equal(target.emptyDiff, false);
+  }
+});
 test('empty diff is a verified no-op and schedule has no PR dependency', async t => {
   const f=await fixture(t);
   assert.equal((await resolveTarget(f.inputs(),f.event(f.base))).emptyDiff,true);
