@@ -949,7 +949,13 @@ async function testOpenAiCredentialsReachWorker() {
     const created = spawnSync(
       "python3",
       ["-m", "venv", "--without-pip", virtualenv],
-      { encoding: "utf8", env: { PATH: process.env.PATH } },
+      {
+        encoding: "utf8",
+        env: {
+          PATH: process.env.PATH,
+          LD_LIBRARY_PATH: process.env.LD_LIBRARY_PATH,
+        },
+      },
     );
     assert.equal(created.status, 0, created.stderr);
   }
@@ -1000,7 +1006,11 @@ async function testOpenAiCredentialsReachWorker() {
           ? path.join(fixture.root, "tools", "python3")
           : "python3",
       PYTHONUTF8: "1",
-      LD_LIBRARY_PATH: path.join(fixture.root, "libraries"),
+      LD_LIBRARY_PATH:
+        (process.env.LD_LIBRARY_PATH === undefined
+          ? ""
+          : process.env.LD_LIBRARY_PATH + path.delimiter) +
+        path.join(fixture.root, "libraries"),
       CODEX_SECURITY_STATE_DIR: path.join(fixture.root, "state"),
       RUNNER_TRACKING_ID: "synthetic-worker-job",
     };
