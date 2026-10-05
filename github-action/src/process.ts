@@ -93,8 +93,8 @@ export async function runProcess(executable: string, args: readonly string[], op
       kill('SIGKILL');
     };
     child.once('error', (error) => { finish(); reject(error); });
+    child.once('exit', finish);
     child.once('close', (code, signal) => {
-      finish();
       const stdout = Buffer.concat(buffers.stdout).toString('utf8');
       const stderr = Buffer.concat(buffers.stderr).toString('utf8');
       if (options.log) {

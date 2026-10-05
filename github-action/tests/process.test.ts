@@ -97,6 +97,27 @@ test('optional diagnostic logging failures do not stop the child or lose capture
   assert.equal(result.stderr, 'ready\nfinal diagnostic');
 });
 
+for (const timeoutMs of [undefined, 1000]) {
+  test(`exited children release inherited descendant pipes ${timeoutMs === undefined ? 'without' : 'with'} an explicit timeout`, {timeout:5000}, async (t) => {
+    const logs: string[] = [];
+    const result = await runProcess(process.execPath, ['-e', String.raw`
+      const { spawn } = require('node:child_process');
+      spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'],
+        {stdio:['ignore', 'inherit', 'inherit']}).unref();
+      process.stderr.write('early diagnostic\n');
+      process.stdout.write(JSON.stringify({detail:'x'.repeat(256 * 1024)}),
+        () => process.stderr.write('final diagnostic 🔎'));
+    `], {cwd:tmpdir(), env:{}, timeoutMs, signal:t.signal, log:line => logs.push(line)});
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.signal, null);
+    assert.equal(result.timedOut, false);
+    assert.equal(result.interrupted, false);
+    assert.equal(JSON.parse(result.stdout).detail, 'x'.repeat(256 * 1024));
+    assert.equal(result.stderr, 'early diagnostic\nfinal diagnostic 🔎');
+    assert.deepEqual(logs, ['[codex-security] early diagnostic', '[codex-security] final diagnostic 🔎']);
+  });
+}
+
 test('timeout terminates an owned process group', async () => {
   const result = await runProcess(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { cwd: tmpdir(), env: {}, timeoutMs: 100 });
   assert.equal(result.timedOut, true);

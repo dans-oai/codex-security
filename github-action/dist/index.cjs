@@ -55728,8 +55728,8 @@ async function runProcess(executable, args, options) {
       finish();
       reject(error2);
     });
+    child.once("exit", finish);
     child.once("close", (code, signal) => {
-      finish();
       const stdout = Buffer.concat(buffers.stdout).toString("utf8");
       const stderr = Buffer.concat(buffers.stderr).toString("utf8");
       if (options.log) {
