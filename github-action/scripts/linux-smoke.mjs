@@ -24,7 +24,7 @@ try {
     const run = spawnSync(process.execPath,[action], {cwd:root, encoding:'utf8', timeout:600_000,maxBuffer:8*1024*1024,env:{...baseEnv,
       GITHUB_ACTIONS:'true',GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_EVENT_PATH:join(commandRoot,'event.json'),
       GITHUB_REPOSITORY:'example/smoke',GITHUB_SHA:sha,GITHUB_REF:'refs/heads/main',GITHUB_ACTOR:'smoke',GITHUB_SERVER_URL:'https://github.com',
-      GITHUB_WORKSPACE:root,RUNNER_TEMP:commandRoot,GITHUB_OUTPUT:join(commandRoot,'output'),GITHUB_STATE:join(commandRoot,'state'),GITHUB_STEP_SUMMARY:join(commandRoot,'summary'),
+      GITHUB_WORKSPACE:root,RUNNER_TEMP:commandRoot,RUNNER_TRACKING_ID:'synthetic-smoke-job',GITHUB_OUTPUT:join(commandRoot,'output'),GITHUB_STATE:join(commandRoot,'state'),GITHUB_STEP_SUMMARY:join(commandRoot,'summary'),
       'INPUT_DRY-RUN':'true',INPUT_VERBOSE:'true',
     }});
     if (run.status !== 0) {

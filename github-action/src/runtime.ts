@@ -47,7 +47,10 @@ export function runtimeEnvironment(paths: Pick<Runtime, 'root' | 'home' | 'codex
     GIT_CONFIG_KEY_2: 'core.fsmonitor', GIT_CONFIG_VALUE_2: 'false',
     GIT_CONFIG_KEY_3: 'core.askPass', GIT_CONFIG_VALUE_3: '/bin/false',
   };
-  if (paths.runnerTrackingId !== undefined) env.RUNNER_TRACKING_ID = paths.runnerTrackingId;
+  if (paths.runnerTrackingId !== undefined) {
+    env.RUNNER_TRACKING_ID = paths.runnerTrackingId;
+    env.CODEX_MCP_NODE_PATH = join(paths.root, 'bin', 'node');
+  }
   if (paths.runnerLibraryPath !== undefined) env.LD_LIBRARY_PATH = paths.runnerLibraryPath;
   if (apiKey !== undefined) {
     if (!apiKey || /[\r\n\u0000]/.test(apiKey)) throw new Error('OPENAI_API_KEY must be a nonempty single-line value.');
@@ -83,10 +86,10 @@ export async function checkPython(pythonPath: string, cwd: string, env: NodeJS.P
     throw new Error('Python 3.11 or later with sqlite3 and tomllib is required. Use actions/setup-python to select a compatible interpreter.');
 }
 
-/** Keep relocated Python usable after Codex clears an MCP child's environment. */
-export async function writePythonLauncher(path: string, pythonPath: string, libraryPath: string): Promise<void> {
+/** Restore a captured runner setting after Codex clears an MCP child's environment. */
+export async function writeRuntimeLauncher(path: string, executable: string, name: 'LD_LIBRARY_PATH' | 'RUNNER_TRACKING_ID', value: string): Promise<void> {
   const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
-  await writeFile(path, `#!/bin/sh\nexport LD_LIBRARY_PATH=${quote(libraryPath)}\nexec ${quote(pythonPath)} "$@"\n`, { mode: 0o700, flag: 'wx' });
+  await writeFile(path, `#!/bin/sh\nexport ${name}=${quote(value)}\nexec ${quote(executable)} "$@"\n`, { mode: 0o700, flag: 'wx' });
 }
 
 export async function setupRuntime(options: RuntimeOptions): Promise<Runtime> {
@@ -110,8 +113,9 @@ export async function setupRuntime(options: RuntimeOptions): Promise<Runtime> {
   const paths = { root, home, codexHome, stateDirectory, runnerPath, runnerTrackingId, runnerLibraryPath };
   try {
     for (const dir of [home, codexHome, stateDirectory, join(root, 'tmp'), join(root, 'bin'), join(root, 'install')]) await mkdir(dir, { mode: 0o700 });
-    await symlink(nodePath, join(root, 'bin', 'node'));
-    if (runnerLibraryPath !== undefined) await writePythonLauncher(join(root, 'bin', 'python3'), pythonPath, runnerLibraryPath);
+    if (runnerTrackingId === undefined) await symlink(nodePath, join(root, 'bin', 'node'));
+    else await writeRuntimeLauncher(join(root, 'bin', 'node'), nodePath, 'RUNNER_TRACKING_ID', runnerTrackingId);
+    if (runnerLibraryPath !== undefined) await writeRuntimeLauncher(join(root, 'bin', 'python3'), pythonPath, 'LD_LIBRARY_PATH', runnerLibraryPath);
     const env = runtimeEnvironment(paths);
     await checkPython(pythonPath, root, env);
     const source = join(actionRoot, 'runtime');

@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, writeFile, readFile, realpath, symlink, rm, stat } from
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { captureRunnerPath, checkPython, cleanupRuntime, resolveTool, runtimeEnvironment, setupRuntime, writePythonLauncher } from '../src/runtime.js';
+import { captureRunnerPath, checkPython, cleanupRuntime, resolveTool, runtimeEnvironment, setupRuntime, writeRuntimeLauncher } from '../src/runtime.js';
 import { runProcess } from '../src/process.js';
 
 test('tool discovery preserves the selected PATH launcher spelling', async (t) => {
@@ -93,10 +93,15 @@ NODE
   assert.equal(invocation.env.OPENAI_API_KEY, undefined);
   assert.equal(invocation.env.ACTIONS_RUNTIME_TOKEN, undefined);
   assert.equal(runtime.env('synthetic-scan-key').PYTHON, 'python3');
+  assert.equal(runtime.env('synthetic-scan-key').CODEX_MCP_NODE_PATH, join(runtime.root, 'bin', 'node'));
   process.env.RUNNER_TRACKING_ID = 'synthetic-later-job';
   process.env.LD_LIBRARY_PATH = '/synthetic-later-library';
   assert.equal(runtime.env('synthetic-scan-key').RUNNER_TRACKING_ID, 'synthetic-first-job');
   assert.equal(runtime.env('synthetic-scan-key').LD_LIBRARY_PATH, libraryPath);
+  const child = await runProcess(join(runtime.root, 'bin', 'node'), ['-e', 'console.log(process.env.RUNNER_TRACKING_ID)'],
+    {cwd:root, env:{...runtime.env('synthetic-scan-key'), RUNNER_TRACKING_ID:undefined}});
+  assert.equal(child.exitCode, 0, child.stderr);
+  assert.equal(child.stdout.trim(), 'synthetic-first-job');
   await cleanupRuntime(runtime.root, root);
 });
 
@@ -128,7 +133,7 @@ test('private Python launcher restores loader settings and preserves virtualenv 
   await mkdir(join(root, 'bin'));
   const launcher = join(root, 'bin', 'python3');
   const libraryPath = (process.env.LD_LIBRARY_PATH === undefined ? '' : process.env.LD_LIBRARY_PATH + ':') + "/synthetic/libs 'quoted' $literal;\nnext";
-  await writePythonLauncher(launcher, join(venv, 'bin', 'python3'), libraryPath);
+  await writeRuntimeLauncher(launcher, join(venv, 'bin', 'python3'), 'LD_LIBRARY_PATH', libraryPath);
   const env = runtimeEnvironment({root, home:root, codexHome:root, stateDirectory:root, runnerLibraryPath:libraryPath});
   const arguments_ = ["literal 'quotes'", '$literal; argument', '--option', '', 'two\nlines'];
   for (const loader of [undefined, '/another-library']) {
@@ -137,6 +142,28 @@ test('private Python launcher restores loader settings and preserves virtualenv 
       ...arguments_], {cwd:root, env:{...env, LD_LIBRARY_PATH:loader}});
     assert.equal(result.exitCode, 0, result.stderr);
     assert.deepEqual(JSON.parse(result.stdout), {prefix:venv, loader:libraryPath, args:arguments_});
+  }
+});
+
+test('private Node launchers restore per-scan runner tracking and preserve literal arguments', async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'runtime-node-tracking-')));
+  t.after(() => rm(root, {recursive:true, force:true}));
+  const arguments_ = ["literal 'quotes'", '$literal; argument', '--option', '', 'two\nlines'];
+  const markers = ["synthetic-first 'quoted' $literal;\njob", 'synthetic-second-job'];
+  const launchers = await Promise.all(markers.map(async (marker, index) => {
+    const launcher = join(root, `node-${index}`);
+    await writeRuntimeLauncher(launcher, process.execPath, 'RUNNER_TRACKING_ID', marker);
+    return launcher;
+  }));
+  for (const tracking of [undefined, 'synthetic-other-job']) {
+    const results = await Promise.all(launchers.map(launcher => runProcess(launcher, ['-e',
+      `const child = require('node:child_process').execFileSync(process.execPath, ['-e', 'process.stdout.write(process.env.RUNNER_TRACKING_ID)'], {encoding:'utf8'});
+       console.log(JSON.stringify({node:process.execPath,tracking:process.env.RUNNER_TRACKING_ID,child,args:process.argv.slice(1)}))`,
+      '--', ...arguments_], {cwd:root, env:{RUNNER_TRACKING_ID:tracking}})));
+    for (const [index, result] of results.entries()) {
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.deepEqual(JSON.parse(result.stdout), {node:process.execPath, tracking:markers[index], child:markers[index], args:arguments_});
+    }
   }
 });
 
@@ -175,7 +202,7 @@ test('Python preflight reports a failed or terminated prerequisite check', async
 });
 
 test('scan environment excludes all inherited credential/config channels', () => {
-  const poison = { INPUT_GITHUB_TOKEN: 'secret', GITHUB_TOKEN: 'secret', ACTIONS_RUNTIME_TOKEN: 'secret', GITHUB_OUTPUT: 'file', NODE_OPTIONS: '--require=evil', PYTHONPATH: 'evil', NPM_CONFIG_REGISTRY: 'evil', AWS_SECRET_ACCESS_KEY: 'secret', CODEX_CLI_PATH: 'evil', OPENAI_BASE_URL: 'evil', HTTPS_PROXY: 'evil' };
+  const poison = { INPUT_GITHUB_TOKEN: 'secret', GITHUB_TOKEN: 'secret', ACTIONS_RUNTIME_TOKEN: 'secret', GITHUB_OUTPUT: 'file', NODE_OPTIONS: '--require=evil', PYTHONPATH: 'evil', NPM_CONFIG_REGISTRY: 'evil', AWS_SECRET_ACCESS_KEY: 'secret', CODEX_CLI_PATH: 'evil', CODEX_MCP_NODE_PATH: 'evil', OPENAI_BASE_URL: 'evil', HTTPS_PROXY: 'evil' };
   const previous = Object.fromEntries(Object.keys(poison).map((key) => [key, process.env[key]]));
   Object.assign(process.env, poison);
   try {
@@ -208,11 +235,13 @@ test('each scan retains its runner tool path while keeping its environment isola
   assert.equal(second.OPENAI_API_KEY, 'second-scan-key');
   assert.equal(first.RUNNER_TRACKING_ID, 'synthetic-first-job');
   assert.equal(second.RUNNER_TRACKING_ID, 'synthetic-second-job');
+  assert.equal(first.CODEX_MCP_NODE_PATH, join(root, 'bin', 'node'));
   assert.equal(first.LD_LIBRARY_PATH, '/synthetic-first-library');
   assert.equal(second.LD_LIBRARY_PATH, '/synthetic-second-library');
   assert.equal(runtimeEnvironment({...paths, runnerLibraryPath:undefined}).LD_LIBRARY_PATH, undefined);
   assert.equal(runtimeEnvironment({...paths, runnerLibraryPath:''}).LD_LIBRARY_PATH, '');
   assert.equal(runtimeEnvironment({...paths, runnerTrackingId:undefined}).RUNNER_TRACKING_ID, undefined);
+  assert.equal(runtimeEnvironment({...paths, runnerTrackingId:undefined}).CODEX_MCP_NODE_PATH, undefined);
 });
 
 test('shipped runtime lock matches the manifest and records dependency integrity', async () => {

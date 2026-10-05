@@ -55903,7 +55903,10 @@ function runtimeEnvironment(paths, apiKey) {
     GIT_CONFIG_KEY_3: "core.askPass",
     GIT_CONFIG_VALUE_3: "/bin/false"
   };
-  if (paths.runnerTrackingId !== void 0) env.RUNNER_TRACKING_ID = paths.runnerTrackingId;
+  if (paths.runnerTrackingId !== void 0) {
+    env.RUNNER_TRACKING_ID = paths.runnerTrackingId;
+    env.CODEX_MCP_NODE_PATH = (0, import_node_path3.join)(paths.root, "bin", "node");
+  }
   if (paths.runnerLibraryPath !== void 0) env.LD_LIBRARY_PATH = paths.runnerLibraryPath;
   if (apiKey !== void 0) {
     if (!apiKey || /[\r\n\u0000]/.test(apiKey)) throw new Error("OPENAI_API_KEY must be a nonempty single-line value.");
@@ -55932,11 +55935,11 @@ async function checkPython(pythonPath, cwd, env) {
   if (result.exitCode !== 0 || result.timedOut || result.interrupted || result.signal)
     throw new Error("Python 3.11 or later with sqlite3 and tomllib is required. Use actions/setup-python to select a compatible interpreter.");
 }
-async function writePythonLauncher(path6, pythonPath, libraryPath) {
-  const quote = (value) => "'" + value.replaceAll("'", "'\\''") + "'";
+async function writeRuntimeLauncher(path6, executable, name, value) {
+  const quote = (value2) => "'" + value2.replaceAll("'", "'\\''") + "'";
   await (0, import_promises2.writeFile)(path6, `#!/bin/sh
-export LD_LIBRARY_PATH=${quote(libraryPath)}
-exec ${quote(pythonPath)} "$@"
+export ${name}=${quote(value)}
+exec ${quote(executable)} "$@"
 `, { mode: 448, flag: "wx" });
 }
 async function setupRuntime(options) {
@@ -55960,8 +55963,9 @@ async function setupRuntime(options) {
   const paths = { root, home, codexHome, stateDirectory, runnerPath, runnerTrackingId, runnerLibraryPath };
   try {
     for (const dir of [home, codexHome, stateDirectory, (0, import_node_path3.join)(root, "tmp"), (0, import_node_path3.join)(root, "bin"), (0, import_node_path3.join)(root, "install")]) await (0, import_promises2.mkdir)(dir, { mode: 448 });
-    await (0, import_promises2.symlink)(nodePath, (0, import_node_path3.join)(root, "bin", "node"));
-    if (runnerLibraryPath !== void 0) await writePythonLauncher((0, import_node_path3.join)(root, "bin", "python3"), pythonPath, runnerLibraryPath);
+    if (runnerTrackingId === void 0) await (0, import_promises2.symlink)(nodePath, (0, import_node_path3.join)(root, "bin", "node"));
+    else await writeRuntimeLauncher((0, import_node_path3.join)(root, "bin", "node"), nodePath, "RUNNER_TRACKING_ID", runnerTrackingId);
+    if (runnerLibraryPath !== void 0) await writeRuntimeLauncher((0, import_node_path3.join)(root, "bin", "python3"), pythonPath, "LD_LIBRARY_PATH", runnerLibraryPath);
     const env = runtimeEnvironment(paths);
     await checkPython(pythonPath, root, env);
     const source = (0, import_node_path3.join)(actionRoot, "runtime");

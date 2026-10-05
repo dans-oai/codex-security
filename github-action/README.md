@@ -201,6 +201,7 @@ lock. It runs on Linux x64 with Node 24 and Python 3.11 or later; the Ubuntu 24.
 runner supplies these prerequisites. npm and Python are found on the runner's
 `PATH`; `actions/setup-node` and `actions/setup-python` can select installations.
 Python helpers preserve the selected virtual environment and library settings.
+The runner's process tracking marker is retained by the scan coordinator and Deep Scan workers.
 Authentication uses `OPENAI_API_KEY`.
 Temporary runtime files are removed after the job; reports remain available to
 downstream steps.

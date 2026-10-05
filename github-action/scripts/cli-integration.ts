@@ -1,12 +1,12 @@
 // Exercise the published, locked CLI and exporter without credentials or model calls.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { parseInputs, scanArguments } from '../src/inputs.js';
 import { analyzeResults } from '../src/results.js';
-import { captureRunnerPath, checkPython, resolveTool, runtimeEnvironment, writePythonLauncher } from '../src/runtime.js';
+import { captureRunnerPath, checkPython, resolveTool, runtimeEnvironment, writeRuntimeLauncher } from '../src/runtime.js';
 import runtimeManifest from '../runtime/package.json' with { type: 'json' };
 
 const cliPackage = resolve(import.meta.dirname, '../runtime/node_modules/@openai/codex-security');
@@ -127,9 +127,30 @@ try {
   const libraryPath = (env.LD_LIBRARY_PATH === undefined ? '' : env.LD_LIBRARY_PATH + ':') + join(root, "loader 'quoted' $literal");
   await mkdir(join(root, 'bin'));
   const pythonLauncher = join(root, 'bin', 'python3');
-  await writePythonLauncher(pythonLauncher, venvPython, libraryPath);
+  await writeRuntimeLauncher(pythonLauncher, venvPython, 'LD_LIBRARY_PATH', libraryPath);
+  const nodeLauncher = join(root, 'bin', 'node');
+  await writeRuntimeLauncher(nodeLauncher, process.execPath, 'RUNNER_TRACKING_ID', 'synthetic-cli-job');
   const venvEnv = runtimeEnvironment({root, home, codexHome:env.CODEX_HOME, stateDirectory:env.CODEX_SECURITY_STATE_DIR,
     runnerPath, runnerTrackingId:'synthetic-cli-job', runnerLibraryPath:libraryPath});
+  // Use the published MCP launcher and its actual allowlist without a model turn.
+  // The synthetic server reports its marker and one actual Node child's marker.
+  const mcpConfig = JSON.parse(await readFile(join(cliPackage, '_bundled_plugin/.mcp.json'), 'utf8')).mcpServers['codex-security'];
+  const mcpFixture = join(root, 'synthetic-plugin');
+  await mkdir(join(mcpFixture, 'scripts'), {recursive:true});
+  await mkdir(join(mcpFixture, 'mcp'));
+  const mcpLauncher = join(mcpFixture, 'scripts/launch_codex_security_mcp');
+  await copyFile(join(cliPackage, '_bundled_plugin/scripts/launch_codex_security_mcp'), mcpLauncher);
+  await writeFile(join(mcpFixture, 'mcp/server.mjs'), `
+    import { execFileSync } from 'node:child_process';
+    console.log(JSON.stringify({tracking:process.env.RUNNER_TRACKING_ID,
+      child:execFileSync(process.execPath, ['-e', 'process.stdout.write(process.env.RUNNER_TRACKING_ID)'], {encoding:'utf8'})}));
+  `);
+  const mcpEnv = Object.fromEntries([...mcpConfig.env_vars, 'PATH', 'HOME'].map(name => [name, venvEnv[name]]));
+  assert.equal(mcpEnv.RUNNER_TRACKING_ID, undefined);
+  assert.equal(mcpEnv.LD_LIBRARY_PATH, undefined);
+  assert.equal(mcpEnv.CODEX_MCP_NODE_PATH, nodeLauncher);
+  const mcpResult = JSON.parse(execFileSync(mcpLauncher, mcpConfig.args, {cwd:repository, env:mcpEnv, encoding:'utf8'}));
+  assert.deepEqual(mcpResult, {tracking:'synthetic-cli-job', child:'synthetic-cli-job'});
   await checkPython(venvPython, root, venvEnv);
   const selected = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', `
     import { execFileSync } from 'node:child_process';
@@ -165,7 +186,7 @@ try {
   assert.equal(result.policyStatus, 'not-evaluated');
   assert.equal(result.sarifUploadReady, false);
   assert.ok(result.errors.some(error => error.includes(cliError.message)));
-  console.log(`Pinned CLI ${installed.version}: real JSON results, severity exits, SARIF export, Deep Scan, literal-path and virtualenv preflights, and failures passed without model calls.`);
+  console.log(`Pinned CLI ${installed.version}: real JSON results, severity exits, SARIF export, Deep Scan, literal-path and virtualenv preflights, MCP runner tracking, and failures passed without model calls.`);
 } finally {
   await rm(root, { recursive: true, force: true });
 }
