@@ -77,7 +77,7 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
   const runtime: Runtime = {
     root: join(root, 'runtime'), home: join(root, 'runtime/home'), codexHome: join(root, 'runtime/codex'),
     stateDirectory: join(root, 'runtime/state'), resultsDirectory: join(root, 'results'),
-    nodePath: '/never-executed/node', cliPath: '/never-executed/cli.js', pythonPath: '/never-executed/python',
+    nodePath: '/never-executed/node', cliPath: '/never-executed/cli.js',
     env: (key) => ({ OPENAI_API_KEY: key }),
   };
   let setups = 0;
@@ -88,6 +88,7 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
   let cliFailure = false;
   let scanProcess: Partial<ProcessResult> = {};
   let scanResult: ((value: any) => void) | undefined;
+  let prepare: (() => void | Promise<void>) | undefined;
   let missingReport: string | undefined;
   let incomplete = false;
   let omitSarif = false;
@@ -111,9 +112,10 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
     const coverage = JSON.parse(await readFile(coveragePath, 'utf8'));
     const sarif = JSON.parse(await readFile(sarifPath, 'utf8'));
-    manifest.scan.target.revision = sha;
+    const scanSha = git('rev-parse', 'HEAD');
+    manifest.scan.target.revision = scanSha;
     if (scenario !== 'schedule') {
-      Object.assign(manifest.scan.target, { kind: 'git_diff', baseRevision: base, headRevision: sha });
+      Object.assign(manifest.scan.target, { kind: 'git_diff', baseRevision: base, headRevision: scanSha });
       coverage.mode = 'branch_diff';
       sarif.runs[0].properties.codexSecurityTargetKind = 'git_diff';
     }
@@ -122,7 +124,7 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
       coverage.completeness = 'partial';
       coverage.deferred = [{id: 'unreviewed-route', reason: 'Dependency <example> unavailable; validation deferred.'}];
     }
-    sarif.runs[0].versionControlProvenance[0].revisionId = sha;
+    sarif.runs[0].versionControlProvenance[0].revisionId = scanSha;
     await writeFile(coveragePath, JSON.stringify(coverage));
     await writeFile(manifestPath, JSON.stringify(manifest));
     await writeFile(sarifPath, JSON.stringify(sarif));
@@ -136,7 +138,7 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
   return {
     repository, sha, base, git, runtime,
     setInput: (name: string, value: string) => { process.env[inputKey(name)] = value; },
-    configure: (options: { exitCode?: number; partial?: boolean; missingSarif?: boolean; mutateCheckout?: boolean; cleanupFails?: boolean; cliFailure?: boolean; scanProcess?: Partial<ProcessResult>; scanResult?: (value: any) => void; missingReport?: string }) => {
+    configure: (options: { exitCode?: number; partial?: boolean; missingSarif?: boolean; mutateCheckout?: boolean; cleanupFails?: boolean; cliFailure?: boolean; scanProcess?: Partial<ProcessResult>; scanResult?: (value: any) => void; missingReport?: string; prepare?: () => void | Promise<void> }) => {
       executionExit = options.exitCode ?? executionExit; incomplete = options.partial ?? incomplete;
       omitSarif = options.missingSarif ?? omitSarif;
       mutateCheckout = options.mutateCheckout ?? mutateCheckout;
@@ -145,6 +147,7 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
       scanProcess = options.scanProcess ?? scanProcess;
       scanResult = options.scanResult ?? scanResult;
       missingReport = options.missingReport ?? missingReport;
+      prepare = options.prepare ?? prepare;
     },
     run: async () => {
       const logs: string[] = [];
@@ -159,7 +162,7 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
       try {
         process.exitCode = 0;
         await runAction(root, {
-          setupRuntime: async () => { setups++; await reports(); return runtime; },
+          setupRuntime: async () => { setups++; await prepare?.(); await reports(); return runtime; },
           cleanupRuntime: async () => { cleanups++; if (cleanupFails) throw new Error('Synthetic cleanup failure'); },
           runProcess: async (_executable, args, options): Promise<ProcessResult> => {
             processes++; capturedArgs = args; capturedEnvironment = options.env;
@@ -435,6 +438,40 @@ test('wrong checkout fails before setup or scanner execution', async (t) => {
   const app = await harness(t); process.env.GITHUB_SHA = '0'.repeat(40); const result = await app.run();
   assert.equal(result.exitCode, 1); assert.equal(result.setups, 0); assert.equal(result.processes, 0);
   assert.equal(result.outputs['scan-status'], 'failed'); assert.equal(result.outputs['sarif-upload-ready'], 'false');
+});
+
+for (const restoreCheckout of [false, true]) {
+  test(`a scan of a commit checked out during preparation fails${restoreCheckout ? ' even after restoring the requested checkout' : ''}`, async (t) => {
+    const app = await harness(t);
+    app.git('commit', '--allow-empty', '-qm', 'Synthetic second revision');
+    const otherSha = app.git('rev-parse', 'HEAD');
+    app.git('checkout', '--detach', app.sha);
+    app.configure({
+      prepare: () => { app.git('checkout', '--detach', otherSha); },
+      scanResult: () => { if (restoreCheckout) app.git('checkout', '--detach', app.sha); },
+    });
+    const result = await app.run();
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.outputs['scan-status'], 'failed');
+    assert.equal(result.outputs['scanned-sha'], app.sha);
+    assert.equal(result.outputs['json-path'], '');
+    assert.equal(result.outputs['sarif-upload-ready'], 'false');
+    assert.match(result.summary, /revision does not match/);
+  });
+}
+
+test('a worktree changed during preparation cannot establish a scan of the requested commit', async (t) => {
+  const app = await harness(t);
+  app.configure({
+    prepare: () => writeFile(join(app.repository, 'app.txt'), 'Changed before the CLI snapshot.\n'),
+    scanResult: value => { value.manifest.scan.target.kind = 'git_worktree'; },
+  });
+  const result = await app.run();
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.outputs['scan-status'], 'failed');
+  assert.equal(result.outputs['json-path'], '');
+  assert.equal(result.outputs['sarif-upload-ready'], 'false');
+  assert.match(result.summary, /revision does not match/);
 });
 
 test('PR policy changes are scanned at the checked-out revision', async (t) => {

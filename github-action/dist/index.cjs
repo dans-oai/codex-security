@@ -55605,7 +55605,7 @@ function parseInputs(read, workspace) {
     retentionDays: num("retention-days", true, 1, 90) ?? 7
   };
 }
-function scanArguments(inputs, target, resultsDirectory, python) {
+function scanArguments(inputs, target, resultsDirectory) {
   const args = [
     "scan",
     target.repository,
@@ -55619,15 +55619,13 @@ function scanArguments(inputs, target, resultsDirectory, python) {
     "--effort",
     inputs.effort,
     "--headless",
-    "--python",
-    python,
     "--output-dir",
     resultsDirectory,
     "--format",
     "json"
   ];
   args.push("--codex", "analytics.enabled=false");
-  for (const path6 of inputs.paths) args.push(`--path=${path6}`);
+  for (const path6 of inputs.paths) args.push(`--path=./${path6}`);
   const options = [
     ["--diff", target.diffBase],
     ["--head", target.diffHead],
@@ -55886,7 +55884,8 @@ function runtimeEnvironment(paths, apiKey) {
     LC_ALL: "C.UTF-8",
     CODEX_SECURITY_NO_UPDATE_NOTICE: "1",
     NO_UPDATE_NOTIFIER: "1",
-    PYTHON: paths.pythonPath,
+    // The pinned CLI preserves virtualenv launchers when resolving a PATH command.
+    PYTHON: "python3",
     PYTHONNOUSERSITE: "1",
     PYTHONSAFEPATH: "1",
     PYTHONUTF8: "1",
@@ -55916,7 +55915,7 @@ async function regularFile(path6) {
   return target;
 }
 async function resolveTool(name) {
-  return (0, import_promises2.realpath)(await which(name, true));
+  return (0, import_node_path3.resolve)(await which(name, true));
 }
 async function checkPython(pythonPath, cwd, env) {
   const result = await runProcess(pythonPath, ["-I", "-c", "import sys, sqlite3, tomllib; assert sys.version_info >= (3, 11)"], { cwd, env, timeoutMs: 1e4 });
@@ -55929,7 +55928,7 @@ async function setupRuntime(options) {
   if (!(0, import_node_path3.isAbsolute)(options.actionRoot) || !(0, import_node_path3.isAbsolute)(options.tempRoot)) throw new Error("Action and temporary roots must be absolute.");
   const tempRoot = await (0, import_promises2.realpath)(options.tempRoot);
   const actionRoot = await (0, import_promises2.realpath)(options.actionRoot);
-  const npmCli = await resolveTool("npm");
+  const npmPath = await resolveTool("npm");
   const pythonPath = await resolveTool("python3");
   const nodePath = process.execPath;
   const root = await (0, import_promises2.mkdtemp)((0, import_node_path3.join)(tempRoot, ROOT_PREFIX));
@@ -55938,7 +55937,7 @@ async function setupRuntime(options) {
   const home = (0, import_node_path3.join)(root, "home");
   const codexHome = (0, import_node_path3.join)(root, "codex-home");
   const stateDirectory = (0, import_node_path3.join)(root, "state");
-  const paths = { root, home, codexHome, stateDirectory, pythonPath, runnerPath: process.env.PATH ?? "/usr/bin:/bin" };
+  const paths = { root, home, codexHome, stateDirectory, runnerPath: process.env.PATH ?? "/usr/bin:/bin" };
   try {
     for (const dir of [home, codexHome, stateDirectory, (0, import_node_path3.join)(root, "tmp"), (0, import_node_path3.join)(root, "bin"), (0, import_node_path3.join)(root, "install")]) await (0, import_promises2.mkdir)(dir, { mode: 448 });
     await (0, import_promises2.symlink)(nodePath, (0, import_node_path3.join)(root, "bin", "node"));
@@ -55956,7 +55955,7 @@ async function setupRuntime(options) {
     const globalConfig = (0, import_node_path3.join)(root, "npm-global.conf");
     await (0, import_promises2.writeFile)(userConfig, "", { mode: 384, flag: "wx" });
     await (0, import_promises2.writeFile)(globalConfig, "", { mode: 384, flag: "wx" });
-    const install = await runProcess(nodePath, [npmCli, "ci", "--ignore-scripts", "--include=optional", `--registry=${REGISTRY}`, `--userconfig=${userConfig}`, `--globalconfig=${globalConfig}`, `--cache=${(0, import_node_path3.join)(root, "npm-cache")}`, "--no-audit", "--no-fund", "--loglevel=error"], { cwd: destination, env, timeoutMs: 10 * 60 * 1e3, log: options.log });
+    const install = await runProcess(npmPath, ["ci", "--ignore-scripts", "--include=optional", `--registry=${REGISTRY}`, `--userconfig=${userConfig}`, `--globalconfig=${globalConfig}`, `--cache=${(0, import_node_path3.join)(root, "npm-cache")}`, "--no-audit", "--no-fund", "--loglevel=error"], { cwd: destination, env, timeoutMs: 10 * 60 * 1e3, log: options.log });
     if (install.exitCode !== 0 || install.timedOut || install.interrupted) {
       for (const line of safeLogLines(install.stdout)) options.log?.(line);
       throw new Error(`Integrity-locked CLI installation failed (exit ${install.exitCode}${install.timedOut ? ", timed out" : ""}${install.interrupted ? ", interrupted" : ""}). Check the prefixed npm diagnostics, registry access, and runner prerequisites.`);
@@ -55996,7 +55995,7 @@ function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function safeSourcePath(value) {
-  return typeof value === "string" && value.length > 0 && !/[\\\x00-\x1f\x7f]/u.test(value) && !value.startsWith("/") && !/^[a-z][a-z0-9+.-]*:/iu.test(value) && value.split("/").every((part) => part !== "..");
+  return typeof value === "string" && value.length > 0 && !/[\\\x00-\x1f\x7f]/u.test(value) && !value.startsWith("/") && !/^(?:[a-z]:|[a-z][a-z0-9+.-]*:\/\/)/iu.test(value) && value.split("/").every((part) => part !== "..");
 }
 function assertSafeSarif(value) {
   const pending = [value];
@@ -56009,7 +56008,7 @@ function assertSafeSarif(value) {
         if (key === "externalPropertyFileReferences" || key === "originalUriBaseIds")
           throw new Error("External SARIF references are unsupported.");
         if (key === "artifactLocation") {
-          if (!isRecord(child) || typeof child.uri !== "string" || child.uriBaseId !== void 0 || child.index !== void 0 || !safeSourcePath(decodeURIComponent(child.uri))) throw new Error("Unsafe SARIF source location.");
+          if (!isRecord(child) || typeof child.uri !== "string" || child.uriBaseId !== void 0 || child.index !== void 0 || /^[a-z][a-z0-9+.-]*:/iu.test(child.uri) || !safeSourcePath(decodeURIComponent(child.uri))) throw new Error("Unsafe SARIF source location.");
         }
         if (typeof child === "object" && child !== null) pending.push(child);
       }
@@ -56097,9 +56096,15 @@ async function analyzeResults(options) {
     result.errors.push("CLI report directory does not match the private output directory.");
     return result;
   }
+  const target = value.manifest.scan.target;
+  const revision = target.kind === "git_diff" ? target.headRevision : target.kind === "git_revision" ? target.revision : void 0;
+  if (revision !== options.scannedSha) {
+    result.errors.push("CLI scan revision does not match the requested checkout commit.");
+    return result;
+  }
   try {
     result.findings = value.findings.findings.map((finding) => {
-      const location = finding.locations[0];
+      const location = finding.locations.find((item) => item.role === "root_control") ?? finding.locations[0];
       if (location && (!safeSourcePath(location.path) || !Number.isSafeInteger(location.startLine) || location.startLine < 1 || location.endLine !== void 0 && (!Number.isSafeInteger(location.endLine) || location.endLine < location.startLine)))
         throw new Error("CLI finding has an unsafe source location for GitHub annotations.");
       return {
@@ -56151,7 +56156,7 @@ async function analyzeResults(options) {
     }
   }
   result.reportStatus = result.paths.sarifPath ? "ready" : "partial";
-  result.sarifUploadReady = result.scanStatus === "completed" && result.reportStatus === "ready" && options.publishable && ["git_revision", "git_diff"].includes(String(value.manifest.scan.target.kind));
+  result.sarifUploadReady = result.scanStatus === "completed" && result.reportStatus === "ready" && options.publishable;
   return result;
 }
 
@@ -99075,7 +99080,7 @@ async function uploadReports(reports, inputs, tempRoot) {
 }
 
 // src/reporting.ts
-function plain(value, limit = 6e3) {
+function plain(value, limit) {
   const text = value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g, "");
   return text.slice(0, limit);
 }
@@ -99238,7 +99243,7 @@ async function runAction(actionRoot, overrides = {}) {
       info(`CLI preparation completed in ${elapsed(preparationStarted)}.`);
       saveState("runtime-root", runtime.root);
       saveState("runtime-temp-root", tempRoot);
-      const args = scanArguments(inputs, target, runtime.resultsDirectory, runtime.pythonPath);
+      const args = scanArguments(inputs, target, runtime.resultsDirectory);
       const log2 = (message) => {
         for (const line of safeLogLines(message)) info(line);
       };
@@ -99285,6 +99290,7 @@ async function runAction(actionRoot, overrides = {}) {
         const result = await analyzeResults({
           stdout: execution.stdout,
           resultsDirectory: runtime.resultsDirectory,
+          scannedSha: target.scannedSha,
           exitCode: execution.exitCode,
           executionFailed: interrupted || !!checkoutError,
           publishable: target.publishable && !interrupted && !checkoutError

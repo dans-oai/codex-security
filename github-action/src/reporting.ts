@@ -3,7 +3,7 @@ import type { Inputs } from './inputs.js';
 import type { Target } from './targets.js';
 import type { ScanResults } from './results.js';
 
-export function plain(value: string, limit = 6000): string {
+export function plain(value: string, limit?: number): string {
   const text = value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g, '');
   return text.slice(0, limit);
 }

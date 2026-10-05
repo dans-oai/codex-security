@@ -6,7 +6,7 @@ import type { ScanResults } from '../src/results.js';
 
 test('credential-shaped text and encodings remain in diagnostics',()=>{
   assert.equal(plain('CANA\x01RY_VALUE'),'CANARY_VALUE');
-  for(const text of ['CANARY_VALUE',Buffer.from('CANARY_VALUE').toString('base64'),encodeURIComponent('canary/key')]) {
+  for(const text of ['CANARY_VALUE',Buffer.from('CANARY_VALUE').toString('base64'),encodeURIComponent('canary/key'), 'Synthetic diagnostic. '.repeat(400)]) {
     assert.equal(plain(text),text);
   }
 });

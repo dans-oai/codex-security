@@ -18,6 +18,7 @@ export interface Finding {
 export interface ResultOptions {
   stdout: string;
   resultsDirectory: string;
+  scannedSha: string;
   exitCode: number | null;
   executionFailed?: boolean;
   publishable: boolean;
@@ -121,9 +122,15 @@ export async function analyzeResults(options: ResultOptions): Promise<ScanResult
     result.errors.push('CLI report directory does not match the private output directory.');
     return result;
   }
+  const target = value.manifest.scan.target;
+  const revision = target.kind === 'git_diff' ? target.headRevision : target.kind === 'git_revision' ? target.revision : undefined;
+  if (revision !== options.scannedSha) {
+    result.errors.push('CLI scan revision does not match the requested checkout commit.');
+    return result;
+  }
   try {
     result.findings = value.findings.findings.map((finding: any): Finding => {
-      const location = finding.locations[0];
+      const location = finding.locations.find((item: any) => item.role === 'root_control') ?? finding.locations[0];
       if (location && (!safeSourcePath(location.path) || !Number.isSafeInteger(location.startLine) || location.startLine < 1 ||
           (location.endLine !== undefined && (!Number.isSafeInteger(location.endLine) || location.endLine < location.startLine))))
         throw new Error('CLI finding has an unsafe source location for GitHub annotations.');
@@ -167,7 +174,6 @@ export async function analyzeResults(options: ResultOptions): Promise<ScanResult
     } catch { result.errors.push('SARIF report is missing, unsafe, or unreadable.'); }
   }
   result.reportStatus = result.paths.sarifPath ? 'ready' : 'partial';
-  result.sarifUploadReady = result.scanStatus === 'completed' && result.reportStatus === 'ready' && options.publishable &&
-    ['git_revision', 'git_diff'].includes(String(value.manifest.scan.target.kind));
+  result.sarifUploadReady = result.scanStatus === 'completed' && result.reportStatus === 'ready' && options.publishable;
   return result;
 }

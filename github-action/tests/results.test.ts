@@ -13,7 +13,7 @@ async function fixture(t: { after(fn: () => Promise<void>): void }): Promise<Res
   await cp(new URL('./fixtures/completed-scan/', import.meta.url), root, { recursive: true });
   const document = async (name: string) => JSON.parse(await readFile(join(root, name), 'utf8'));
   return {
-    resultsDirectory: root, exitCode: 0, publishable: true,
+    resultsDirectory: root, scannedSha: 'a'.repeat(40), exitCode: 0, publishable: true,
     stdout: JSON.stringify({
       manifest: await document('scan-manifest.json'),
       findings: await document('findings.json'),
@@ -51,6 +51,41 @@ test('uses the structured CLI findings instead of reparsing report documents', a
   const result = await analyzeResults(opts);
   assert.equal(result.scanStatus, 'completed');
   assert.equal(result.findings[0]?.title, 'Title from the CLI result');
+});
+
+test('annotations prefer the root control over an earlier entry point', async (t) => {
+  const opts = await fixture(t);
+  change(opts, (value) => {
+    value.findings.findings[0].locations = [
+      {role: 'entrypoint', path: 'src/route.ts', startLine: 7},
+      {role: 'root_control', path: 'src/validation.ts', startLine: 30, endLine: 32},
+    ];
+  });
+  const result = await analyzeResults(opts);
+  assert.equal(result.scanStatus, 'completed');
+  assert.equal(result.findings[0]?.path, 'src/validation.ts');
+  assert.equal(result.findings[0]?.startLine, 30);
+  assert.equal(result.findings[0]?.endLine, 32);
+});
+
+test('reports must describe the requested repository or diff revision', async (t) => {
+  const opts = await fixture(t);
+  for (const kind of ['git_revision', 'git_diff']) {
+    change(opts, (value) => {
+      Object.assign(value.manifest.scan.target, {kind, revision: 'b'.repeat(40), headRevision: 'b'.repeat(40)});
+    });
+    const result = await analyzeResults(opts);
+    assert.equal(result.scanStatus, 'failed');
+    assert.equal(result.sarifUploadReady, false);
+    assert.equal(result.paths.jsonPath, '');
+    assert.match(result.errors.join('\n'), /revision does not match/);
+    change(opts, (value) => {
+      value.manifest.scan.target[kind === 'git_diff' ? 'headRevision' : 'revision'] = opts.scannedSha;
+    });
+    assert.equal((await analyzeResults(opts)).scanStatus, 'completed');
+  }
+  change(opts, (value) => { Object.assign(value.manifest.scan.target, {kind: 'git_worktree', revision: opts.scannedSha}); });
+  assert.equal((await analyzeResults(opts)).scanStatus, 'failed', 'a dirty worktree is not the requested immutable commit');
 });
 
 test('report collection preserves credential-shaped diagnostic content', async (t) => {
@@ -256,7 +291,7 @@ test('never publishes a SARIF path outside the private report directory', async 
 
 test('unsafe source locations cannot reach annotations or published results', async (t) => {
   const opts = await fixture(t);
-  for (const path of ['../secret', '/etc/passwd', 'https://example.com/source', 'a\\b']) {
+  for (const path of ['../secret', '/etc/passwd', 'https://example.com/source', 'a\\b', 'C:/source.ts', 'C:source.ts']) {
     change(opts, (value) => { value.findings.findings[0].locations[0].path = path; });
     const result = await analyzeResults(opts);
     assert.equal(result.scanStatus, 'failed');
@@ -291,6 +326,8 @@ test('SARIF publication rejects external references and encoded traversal paths'
   for (const sarif of [
     {runs: [{results: [{relatedLocations: [{physicalLocation: {artifactLocation: {uri: '%2e%2e/secret'}}}]}]}]},
     {runs: [{results: [{locations: [{physicalLocation: {artifactLocation: {uri: 'https://example.invalid/source'}}}]}]}]},
+    {runs: [{results: [{locations: [{physicalLocation: {artifactLocation: {uri: 'file:/etc/passwd'}}}]}]}]},
+    {runs: [{results: [{locations: [{physicalLocation: {artifactLocation: {uri: 'C%3A/source.ts'}}}]}]}]},
     {runs: [{externalPropertyFileReferences: {}}]},
   ]) {
     await writeFile(join(opts.resultsDirectory, 'exports/results.sarif'), JSON.stringify(sarif));
@@ -314,10 +351,10 @@ test('valid empty and partial findings distinguish zero counts from unavailable 
 
 test('accepted relative path spellings preserve completed findings and SARIF', async (t) => {
   const opts = await fixture(t);
-  for (const path of ['./src/extract.py', 'src//extract.py']) {
+  for (const path of ['./src/extract.py', 'src//extract.py', 'module:handler.ts']) {
     change(opts, (value) => { value.findings.findings[0].locations[0].path = path; });
     await writeFile(join(opts.resultsDirectory, 'exports/results.sarif'), JSON.stringify({runs: [{results: [
-      {locations: [{physicalLocation: {artifactLocation: {uri: path}}}]},
+      {locations: [{physicalLocation: {artifactLocation: {uri: path.replaceAll(':', '%3A')}}}]},
     ]}]}));
     const result = await analyzeResults(opts);
     assert.equal(result.scanStatus, 'completed');

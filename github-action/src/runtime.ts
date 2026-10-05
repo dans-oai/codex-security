@@ -17,7 +17,6 @@ export interface RuntimeOptions {
 export interface Runtime {
   nodePath: string;
   cliPath: string;
-  pythonPath: string;
   root: string;
   home: string;
   codexHome: string;
@@ -28,7 +27,7 @@ export interface Runtime {
 }
 
 /** Deliberately construct a new environment: never copy process.env. */
-export function runtimeEnvironment(paths: Pick<Runtime, 'root' | 'home' | 'codexHome' | 'stateDirectory' | 'pythonPath' | 'runnerPath'>, apiKey?: string): NodeJS.ProcessEnv {
+export function runtimeEnvironment(paths: Pick<Runtime, 'root' | 'home' | 'codexHome' | 'stateDirectory' | 'runnerPath'>, apiKey?: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     PATH: `${join(paths.root, 'bin')}:${paths.runnerPath ?? '/usr/bin:/bin'}`,
     HOME: paths.home, CODEX_HOME: paths.codexHome,
@@ -37,7 +36,8 @@ export function runtimeEnvironment(paths: Pick<Runtime, 'root' | 'home' | 'codex
     XDG_CONFIG_HOME: join(paths.home, '.config'), XDG_CACHE_HOME: join(paths.home, '.cache'),
     CI: 'true', NO_COLOR: '1', TERM: 'dumb', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8',
     CODEX_SECURITY_NO_UPDATE_NOTICE: '1', NO_UPDATE_NOTIFIER: '1',
-    PYTHON: paths.pythonPath, PYTHONNOUSERSITE: '1', PYTHONSAFEPATH: '1', PYTHONUTF8: '1',
+    // The pinned CLI preserves virtualenv launchers when resolving a PATH command.
+    PYTHON: 'python3', PYTHONNOUSERSITE: '1', PYTHONSAFEPATH: '1', PYTHONUTF8: '1',
     GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0',
     GIT_CONFIG_COUNT: '4',
     GIT_CONFIG_KEY_0: 'credential.helper', GIT_CONFIG_VALUE_0: '',
@@ -61,7 +61,7 @@ async function regularFile(path: string): Promise<string> {
 
 /** Resolve runner tools before constructing the isolated child environment. */
 export async function resolveTool(name: 'npm' | 'python3'): Promise<string> {
-  return realpath(await which(name, true));
+  return resolve(await which(name, true));
 }
 
 export async function checkPython(pythonPath: string, cwd: string, env: NodeJS.ProcessEnv): Promise<void> {
@@ -76,7 +76,7 @@ export async function setupRuntime(options: RuntimeOptions): Promise<Runtime> {
   if (!isAbsolute(options.actionRoot) || !isAbsolute(options.tempRoot)) throw new Error('Action and temporary roots must be absolute.');
   const tempRoot = await realpath(options.tempRoot);
   const actionRoot = await realpath(options.actionRoot);
-  const npmCli = await resolveTool('npm');
+  const npmPath = await resolveTool('npm');
   const pythonPath = await resolveTool('python3');
   const nodePath = process.execPath;
   const root = await mkdtemp(join(tempRoot, ROOT_PREFIX));
@@ -85,7 +85,7 @@ export async function setupRuntime(options: RuntimeOptions): Promise<Runtime> {
   const home = join(root, 'home');
   const codexHome = join(root, 'codex-home');
   const stateDirectory = join(root, 'state');
-  const paths = { root, home, codexHome, stateDirectory, pythonPath, runnerPath: process.env.PATH ?? '/usr/bin:/bin' };
+  const paths = { root, home, codexHome, stateDirectory, runnerPath: process.env.PATH ?? '/usr/bin:/bin' };
   try {
     for (const dir of [home, codexHome, stateDirectory, join(root, 'tmp'), join(root, 'bin'), join(root, 'install')]) await mkdir(dir, { mode: 0o700 });
     await symlink(nodePath, join(root, 'bin', 'node'));
@@ -103,7 +103,7 @@ export async function setupRuntime(options: RuntimeOptions): Promise<Runtime> {
     const globalConfig = join(root, 'npm-global.conf');
     await writeFile(userConfig, '', { mode: 0o600, flag: 'wx' });
     await writeFile(globalConfig, '', { mode: 0o600, flag: 'wx' });
-    const install = await runProcess(nodePath, [npmCli, 'ci', '--ignore-scripts', '--include=optional', `--registry=${REGISTRY}`, `--userconfig=${userConfig}`, `--globalconfig=${globalConfig}`, `--cache=${join(root, 'npm-cache')}`, '--no-audit', '--no-fund', '--loglevel=error'], { cwd: destination, env, timeoutMs: 10 * 60 * 1000, log: options.log });
+    const install = await runProcess(npmPath, ['ci', '--ignore-scripts', '--include=optional', `--registry=${REGISTRY}`, `--userconfig=${userConfig}`, `--globalconfig=${globalConfig}`, `--cache=${join(root, 'npm-cache')}`, '--no-audit', '--no-fund', '--loglevel=error'], { cwd: destination, env, timeoutMs: 10 * 60 * 1000, log: options.log });
     if (install.exitCode !== 0 || install.timedOut || install.interrupted) {
       // npm sometimes writes lock/usage diagnostics to stdout. This process had
       // no credentials and every physical line is still treated as untrusted.

@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { parseInputs, scanArguments } from '../src/inputs.js';
 import { analyzeResults } from '../src/results.js';
-import { resolveTool } from '../src/runtime.js';
+import { checkPython, resolveTool, runtimeEnvironment } from '../src/runtime.js';
 import runtimeManifest from '../runtime/package.json' with { type: 'json' };
 
 const cliPackage = resolve(import.meta.dirname, '../runtime/node_modules/@openai/codex-security');
@@ -32,9 +32,9 @@ try {
   git('add', 'example.ts');
   git('commit', '-m', 'Synthetic fixture');
 
-  const run = (args: string[], expectedExit: number) => {
+  const run = (args: string[], expectedExit: number, environment: NodeJS.ProcessEnv = env) => {
     const result = spawnSync(process.execPath, [cli, ...args], {
-      cwd: repository, env, encoding: 'utf8', timeout: 120_000, maxBuffer: 8 * 1024 * 1024,
+      cwd: repository, env:environment, encoding: 'utf8', timeout: 120_000, maxBuffer: 8 * 1024 * 1024,
     });
     if (result.error) throw result.error;
     assert.equal(result.status, expectedExit, result.stderr);
@@ -52,7 +52,7 @@ try {
     assert.equal(cliResult.sarifPath, join(resultsDirectory, 'exports/results.sarif'));
     run(['export', resultsDirectory, '--export-format', 'sarif', '--source-root', repository,
       '--output', cliResult.sarifPath], 0);
-    const result = await analyzeResults({ stdout, resultsDirectory, exitCode, publishable: true });
+    const result = await analyzeResults({ stdout, resultsDirectory, exitCode, publishable: true, scannedSha:git('rev-parse', 'HEAD').trim() });
     assert.equal(result.scanStatus, 'completed');
     assert.equal(result.policyStatus, threshold ? 'failed' : 'passed');
     assert.equal(result.reportStatus, 'ready');
@@ -73,7 +73,7 @@ try {
   // Deep Scan cannot use --mock; validate the Action's actual arguments without model calls.
   const deepInputs: Record<string, string> = {mode: 'deep', 'max-time-hours': '0.25', paths: 'example.ts', 'dry-run': 'true'};
   const deepArguments = scanArguments(parseInputs(name => deepInputs[name] ?? '', repository),
-    {repository}, join(root, 'deep-results'), await resolveTool('python3'));
+    {repository}, join(root, 'deep-results'));
   const deepPreflight = JSON.parse(run(deepArguments, 0));
   assert.equal(deepPreflight.dryRun, true);
   assert.equal(deepPreflight.mode, 'deep');
@@ -87,13 +87,13 @@ try {
   git('commit', '-m', 'Synthetic option-shaped path');
   const pathInputs: Record<string, string> = {paths: './--help', 'dry-run': 'true'};
   const pathArguments = scanArguments(parseInputs(name => pathInputs[name] ?? '', repository),
-    {repository}, join(root, 'path-results'), await resolveTool('python3'));
+    {repository}, join(root, 'path-results'));
   const pathPreflight = JSON.parse(run(pathArguments, 0));
   assert.equal(pathPreflight.dryRun, true);
   assert.deepEqual(pathPreflight.target.paths, ['--help']);
 
-  // Existing glob-shaped filenames are literal scopes, not pathspec expressions.
-  const literalFiles = ['src/[slug]/page.tsx', 'src/star*file.ts', 'src/question?file.ts'];
+  // Existing glob, tilde, and colon filenames are literal repository scopes.
+  const literalFiles = ['src/[slug]/page.tsx', 'src/star*file.ts', 'src/question?file.ts', '~/example.ts', 'module:handler.ts'];
   const decoys = ['src/s/page.tsx', 'src/l/page.tsx', 'src/starOtherfile.ts', 'src/questionXfile.ts'];
   for (const path of [...literalFiles, ...decoys]) {
     await mkdir(dirname(join(repository, path)), {recursive:true});
@@ -104,7 +104,7 @@ try {
   const literalInputs: Record<string, string> = {paths: scopes.join('\n'), 'dry-run': 'true'};
   const python = await resolveTool('python3');
   const literalArguments = scanArguments(parseInputs(name => literalInputs[name] ?? '', repository),
-    {repository}, join(root, 'literal-results'), python);
+    {repository}, join(root, 'literal-results'));
   const literalPreflight = JSON.parse(run(literalArguments, 0));
   assert.equal(literalPreflight.dryRun, true);
   assert.deepEqual(literalPreflight.target.paths, scopes);
@@ -115,19 +115,35 @@ try {
     'make-repo-scope-input', '--repo', repository, '--scopes-file', scopesFile, '--out', sourceInput],
     {cwd: repository, env, stdio: ['ignore', 'pipe', 'pipe']});
   const selectedFiles = (await readFile(sourceInput, 'utf8')).trim().split('\n').map(row => JSON.parse(row).path).sort();
-  assert.deepEqual(selectedFiles, [...literalFiles].sort(), 'Real scope selection must exclude glob-matching decoys');
+  assert.deepEqual(selectedFiles, [...literalFiles].sort(), 'Real scope selection must preserve literal names and exclude glob-matching decoys');
+
+  // Preserve the runner-selected virtualenv through Action preflight and the
+  // pinned CLI's resolver, which otherwise canonicalizes explicit Python paths.
+  const venv = join(root, 'venv');
+  execFileSync(python, ['-m', 'venv', '--without-pip', venv], {env, stdio:['ignore','pipe','pipe']});
+  const venvPython = join(venv, 'bin', 'python3');
+  const venvEnv = runtimeEnvironment({root, home, codexHome:env.CODEX_HOME, stateDirectory:env.CODEX_SECURITY_STATE_DIR,
+    runnerPath:[join(venv, 'bin'), env.PATH].filter(Boolean).join(delimiter)});
+  await checkPython(venvPython, root, venvEnv);
+  const { resolvePluginPython } = await import(join(cliPackage, 'dist/runtime.js'));
+  const selectedPython = await resolvePluginPython({environment:venvEnv, protectedRoot:repository});
+  assert.equal(selectedPython, venvPython);
+  assert.equal(execFileSync(selectedPython, ['-I', '-c', 'import sys; print(sys.prefix)'], {env:venvEnv, encoding:'utf8'}).trim(), venv);
+  const venvArguments = scanArguments(parseInputs(name => deepInputs[name] ?? '', repository),
+    {repository}, join(root, 'venv-results'));
+  assert.equal(JSON.parse(run(venvArguments, 0, venvEnv)).dryRun, true);
 
   // The CLI owns scan validation: an output directory inside the source checkout is forbidden.
   const resultsDirectory = join(repository, 'results');
   const stdout = run(['scan', repository, '--mock', '--format', 'json', '--output-dir', resultsDirectory], 2);
   const cliError = JSON.parse(stdout);
   assert.equal(cliError.status, 'failed');
-  const result = await analyzeResults({ stdout, resultsDirectory, exitCode: 2, publishable: true });
+  const result = await analyzeResults({ stdout, resultsDirectory, exitCode: 2, publishable: true, scannedSha:git('rev-parse', 'HEAD').trim() });
   assert.equal(result.scanStatus, 'failed');
   assert.equal(result.policyStatus, 'not-evaluated');
   assert.equal(result.sarifUploadReady, false);
   assert.ok(result.errors.some(error => error.includes(cliError.message)));
-  console.log(`Pinned CLI ${installed.version}: real JSON results, severity exits, SARIF export, Deep Scan and literal-path preflights, and failures passed without model calls.`);
+  console.log(`Pinned CLI ${installed.version}: real JSON results, severity exits, SARIF export, Deep Scan, literal-path and virtualenv preflights, and failures passed without model calls.`);
 } finally {
   await rm(root, { recursive: true, force: true });
 }

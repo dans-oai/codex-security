@@ -90,7 +90,7 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
       core.info(`CLI preparation completed in ${elapsed(preparationStarted)}.`);
       core.saveState('runtime-root', runtime.root);
       core.saveState('runtime-temp-root', tempRoot);
-      const args = scanArguments(inputs, target, runtime.resultsDirectory, runtime.pythonPath);
+      const args = scanArguments(inputs, target, runtime.resultsDirectory);
       const log = (message: string): void => {
         for (const line of safeLogLines(message)) core.info(line);
       };
@@ -129,7 +129,7 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
           try { await resolveTarget(inputs, event); }
           catch { checkoutError = 'The source checkout changed during scanning. Results cannot establish a completed scan of the requested revision.'; }
         }
-        const result = await analyzeResults({stdout: execution.stdout, resultsDirectory: runtime.resultsDirectory,
+        const result = await analyzeResults({stdout: execution.stdout, resultsDirectory: runtime.resultsDirectory, scannedSha: target.scannedSha,
           exitCode: execution.exitCode, executionFailed: interrupted || !!checkoutError, publishable: target.publishable && !interrupted && !checkoutError});
         if (result.paths.jsonPath && !result.paths.sarifPath)
           core.warning('SARIF report is unavailable; scan results and other reports are still available.');

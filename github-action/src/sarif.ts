@@ -5,7 +5,7 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 export function safeSourcePath(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 &&
     !/[\\\x00-\x1f\x7f]/u.test(value) && !value.startsWith('/') &&
-    !/^[a-z][a-z0-9+.-]*:/iu.test(value) &&
+    !/^(?:[a-z]:|[a-z][a-z0-9+.-]*:\/\/)/iu.test(value) &&
     value.split('/').every((part) => part !== '..');
 }
 
@@ -21,6 +21,7 @@ export function assertSafeSarif(value: unknown): void {
           throw new Error('External SARIF references are unsupported.');
         if (key === 'artifactLocation') {
           if (!isRecord(child) || typeof child.uri !== 'string' || child.uriBaseId !== undefined || child.index !== undefined ||
+              /^[a-z][a-z0-9+.-]*:/iu.test(child.uri) ||
               !safeSourcePath(decodeURIComponent(child.uri))) throw new Error('Unsafe SARIF source location.');
         }
         if (typeof child === 'object' && child !== null) pending.push(child);

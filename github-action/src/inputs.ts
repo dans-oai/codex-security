@@ -73,18 +73,19 @@ export function parseInputs(read: (name: string) => string, workspace: string): 
   };
 }
 
-export function scanArguments(inputs: Inputs, target: {repository: string; diffBase?: string; diffHead?: string}, resultsDirectory: string, python: string): string[] {
+export function scanArguments(inputs: Inputs, target: {repository: string; diffBase?: string; diffHead?: string}, resultsDirectory: string): string[] {
   // The pinned CLI checks API-key presence even during local preflight. Its
   // dry-run branch never starts a model session; auto allows keyless preflight
   // with our empty private credential home. Real scans always use api-key.
   const args = ['scan', target.repository, '--auth', inputs.dryRun ? 'auto' : 'api-key', '--provider', 'openai', '--mode', inputs.mode,
-    `--model=${inputs.model}`, '--effort', inputs.effort, '--headless', '--python', python,
+    `--model=${inputs.model}`, '--effort', inputs.effort, '--headless',
     '--output-dir', resultsDirectory, '--format', 'json'];
   // Preserve the pinned CLI's sandbox and automatic approval-review defaults.
   // Forcing approval_policy="never" prevents recovery from hosted Linux sandbox errors.
   args.push('--codex', 'analytics.enabled=false');
-  // Bind the value so a normalized path beginning with "-" stays a path.
-  for (const path of inputs.paths) args.push(`--path=${path}`);
+  // Bind the option value and keep it explicitly relative so the CLI treats
+  // leading '-' and '~' as literal repository filenames.
+  for (const path of inputs.paths) args.push(`--path=./${path}`);
   const options: Array<[string, string | number | undefined]> = [
     ['--diff', target.diffBase], ['--head', target.diffHead], ['--max-cost', inputs.maxCost],
     ['--max-time-hours', inputs.maxTimeHours],
