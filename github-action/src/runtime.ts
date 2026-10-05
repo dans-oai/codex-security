@@ -1,6 +1,6 @@
 import { which } from '@actions/io';
 import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { runProcess, safeLogLines } from './process.js';
 import runtimeManifest from '../runtime/package.json' with { type: 'json' };
 
@@ -23,11 +23,12 @@ export interface Runtime {
   stateDirectory: string;
   resultsDirectory: string;
   runnerPath?: string;
+  runnerTrackingId?: string;
   env: (apiKey: string) => NodeJS.ProcessEnv;
 }
 
 /** Deliberately construct a new environment: never copy process.env. */
-export function runtimeEnvironment(paths: Pick<Runtime, 'root' | 'home' | 'codexHome' | 'stateDirectory' | 'runnerPath'>, apiKey?: string): NodeJS.ProcessEnv {
+export function runtimeEnvironment(paths: Pick<Runtime, 'root' | 'home' | 'codexHome' | 'stateDirectory' | 'runnerPath' | 'runnerTrackingId'>, apiKey?: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     PATH: `${join(paths.root, 'bin')}:${paths.runnerPath ?? '/usr/bin:/bin'}`,
     HOME: paths.home, CODEX_HOME: paths.codexHome,
@@ -45,6 +46,7 @@ export function runtimeEnvironment(paths: Pick<Runtime, 'root' | 'home' | 'codex
     GIT_CONFIG_KEY_2: 'core.fsmonitor', GIT_CONFIG_VALUE_2: 'false',
     GIT_CONFIG_KEY_3: 'core.askPass', GIT_CONFIG_VALUE_3: '/bin/false',
   };
+  if (paths.runnerTrackingId !== undefined) env.RUNNER_TRACKING_ID = paths.runnerTrackingId;
   if (apiKey !== undefined) {
     if (!apiKey || /[\r\n\u0000]/.test(apiKey)) throw new Error('OPENAI_API_KEY must be a nonempty single-line value.');
     env.OPENAI_API_KEY = apiKey;
@@ -59,9 +61,18 @@ async function regularFile(path: string): Promise<string> {
   return target;
 }
 
-/** Resolve runner tools before constructing the isolated child environment. */
-export async function resolveTool(name: 'npm' | 'python3'): Promise<string> {
-  return resolve(await which(name, true));
+/** Anchor PATH lookup before installer, scanner, or worker cwd changes. */
+export function captureRunnerPath(value = process.env.PATH ?? '/usr/bin:/bin', cwd = process.cwd()): string {
+  return value.split(delimiter).map(entry => resolve(cwd, entry)).join(delimiter);
+}
+
+/** Discover the same launcher that the captured child PATH will select. */
+export async function resolveTool(name: 'npm' | 'python3', runnerPath = captureRunnerPath()): Promise<string> {
+  for (const directory of runnerPath.split(delimiter)) {
+    const executable = await which(join(directory, name));
+    if (executable) return executable;
+  }
+  throw new Error(`Unable to locate ${name} on the runner PATH.`);
 }
 
 export async function checkPython(pythonPath: string, cwd: string, env: NodeJS.ProcessEnv): Promise<void> {
@@ -74,10 +85,12 @@ export async function setupRuntime(options: RuntimeOptions): Promise<Runtime> {
   if (process.platform !== 'linux' || process.arch !== 'x64') throw new Error('Codex Security Action currently supports Linux x64 runners only.');
   if (Number(process.versions.node.split('.')[0]) !== 24) throw new Error('Codex Security Action requires the Node 24 GitHub Actions runtime.');
   if (!isAbsolute(options.actionRoot) || !isAbsolute(options.tempRoot)) throw new Error('Action and temporary roots must be absolute.');
+  const runnerPath = captureRunnerPath();
+  const runnerTrackingId = process.env.RUNNER_TRACKING_ID;
   const tempRoot = await realpath(options.tempRoot);
   const actionRoot = await realpath(options.actionRoot);
-  const npmPath = await resolveTool('npm');
-  const pythonPath = await resolveTool('python3');
+  const npmPath = await resolveTool('npm', runnerPath);
+  const pythonPath = await resolveTool('python3', runnerPath);
   const nodePath = process.execPath;
   const root = await mkdtemp(join(tempRoot, ROOT_PREFIX));
   await chmod(root, 0o700);
@@ -85,7 +98,7 @@ export async function setupRuntime(options: RuntimeOptions): Promise<Runtime> {
   const home = join(root, 'home');
   const codexHome = join(root, 'codex-home');
   const stateDirectory = join(root, 'state');
-  const paths = { root, home, codexHome, stateDirectory, runnerPath: process.env.PATH ?? '/usr/bin:/bin' };
+  const paths = { root, home, codexHome, stateDirectory, runnerPath, runnerTrackingId };
   try {
     for (const dir of [home, codexHome, stateDirectory, join(root, 'tmp'), join(root, 'bin'), join(root, 'install')]) await mkdir(dir, { mode: 0o700 });
     await symlink(nodePath, join(root, 'bin', 'node'));

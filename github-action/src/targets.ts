@@ -38,6 +38,7 @@ export function validateEvent(event: EventContext): void {
 export function gitEnvironment(): NodeJS.ProcessEnv {
   return {
     PATH: '/usr/bin:/bin', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8',
+    RUNNER_TRACKING_ID: process.env.RUNNER_TRACKING_ID,
     GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0',
   };
 }

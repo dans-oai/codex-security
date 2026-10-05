@@ -11927,10 +11927,10 @@ var require_headers = __commonJS({
         const lowercaseName = isLowerCase ? name : name.toLowerCase();
         const exists3 = this[kHeadersMap].get(lowercaseName);
         if (exists3) {
-          const delimiter3 = lowercaseName === "cookie" ? "; " : ", ";
+          const delimiter4 = lowercaseName === "cookie" ? "; " : ", ";
           this[kHeadersMap].set(lowercaseName, {
             name: exists3.name,
-            value: `${exists3.value}${delimiter3}${value}`
+            value: `${exists3.value}${delimiter4}${value}`
           });
         } else {
           this[kHeadersMap].set(lowercaseName, { name, value });
@@ -23489,8 +23489,8 @@ var require_common = __commonJS({
         }
         return debug2;
       }
-      function extend2(namespace, delimiter3) {
-        const newDebug = createDebug(this.namespace + (typeof delimiter3 === "undefined" ? ":" : delimiter3) + namespace);
+      function extend2(namespace, delimiter4) {
+        const newDebug = createDebug(this.namespace + (typeof delimiter4 === "undefined" ? ":" : delimiter4) + namespace);
         newDebug.log = this.log;
         return newDebug;
       }
@@ -54217,15 +54217,15 @@ function issueFileCommand(command, message) {
   });
 }
 function prepareKeyValueMessage(key, value) {
-  const delimiter3 = `ghadelimiter_${crypto.randomUUID()}`;
+  const delimiter4 = `ghadelimiter_${crypto.randomUUID()}`;
   const convertedValue = toCommandValue(value);
-  if (key.includes(delimiter3)) {
-    throw new Error(`Unexpected input: name should not contain the delimiter "${delimiter3}"`);
+  if (key.includes(delimiter4)) {
+    throw new Error(`Unexpected input: name should not contain the delimiter "${delimiter4}"`);
   }
-  if (convertedValue.includes(delimiter3)) {
-    throw new Error(`Unexpected input: value should not contain the delimiter "${delimiter3}"`);
+  if (convertedValue.includes(delimiter4)) {
+    throw new Error(`Unexpected input: value should not contain the delimiter "${delimiter4}"`);
   }
-  return `${key}<<${delimiter3}${os2.EOL}${convertedValue}${os2.EOL}${delimiter3}`;
+  return `${key}<<${delimiter4}${os2.EOL}${convertedValue}${os2.EOL}${delimiter4}`;
 }
 
 // node_modules/@actions/core/lib/core.js
@@ -55760,6 +55760,7 @@ function gitEnvironment() {
     PATH: "/usr/bin:/bin",
     LANG: "C.UTF-8",
     LC_ALL: "C.UTF-8",
+    RUNNER_TRACKING_ID: process.env.RUNNER_TRACKING_ID,
     GIT_CONFIG_NOSYSTEM: "1",
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_TERMINAL_PROMPT: "0",
@@ -55902,6 +55903,7 @@ function runtimeEnvironment(paths, apiKey) {
     GIT_CONFIG_KEY_3: "core.askPass",
     GIT_CONFIG_VALUE_3: "/bin/false"
   };
+  if (paths.runnerTrackingId !== void 0) env.RUNNER_TRACKING_ID = paths.runnerTrackingId;
   if (apiKey !== void 0) {
     if (!apiKey || /[\r\n\u0000]/.test(apiKey)) throw new Error("OPENAI_API_KEY must be a nonempty single-line value.");
     env.OPENAI_API_KEY = apiKey;
@@ -55914,8 +55916,15 @@ async function regularFile(path6) {
   if (!info2.isFile()) throw new Error("Runtime prerequisite must be a regular file.");
   return target;
 }
-async function resolveTool(name) {
-  return (0, import_node_path3.resolve)(await which(name, true));
+function captureRunnerPath(value = process.env.PATH ?? "/usr/bin:/bin", cwd = process.cwd()) {
+  return value.split(import_node_path3.delimiter).map((entry) => (0, import_node_path3.resolve)(cwd, entry)).join(import_node_path3.delimiter);
+}
+async function resolveTool(name, runnerPath = captureRunnerPath()) {
+  for (const directory of runnerPath.split(import_node_path3.delimiter)) {
+    const executable = await which((0, import_node_path3.join)(directory, name));
+    if (executable) return executable;
+  }
+  throw new Error(`Unable to locate ${name} on the runner PATH.`);
 }
 async function checkPython(pythonPath, cwd, env) {
   const result = await runProcess(pythonPath, ["-I", "-c", "import sys, sqlite3, tomllib; assert sys.version_info >= (3, 11)"], { cwd, env, timeoutMs: 1e4 });
@@ -55926,10 +55935,12 @@ async function setupRuntime(options) {
   if (process.platform !== "linux" || process.arch !== "x64") throw new Error("Codex Security Action currently supports Linux x64 runners only.");
   if (Number(process.versions.node.split(".")[0]) !== 24) throw new Error("Codex Security Action requires the Node 24 GitHub Actions runtime.");
   if (!(0, import_node_path3.isAbsolute)(options.actionRoot) || !(0, import_node_path3.isAbsolute)(options.tempRoot)) throw new Error("Action and temporary roots must be absolute.");
+  const runnerPath = captureRunnerPath();
+  const runnerTrackingId = process.env.RUNNER_TRACKING_ID;
   const tempRoot = await (0, import_promises2.realpath)(options.tempRoot);
   const actionRoot = await (0, import_promises2.realpath)(options.actionRoot);
-  const npmPath = await resolveTool("npm");
-  const pythonPath = await resolveTool("python3");
+  const npmPath = await resolveTool("npm", runnerPath);
+  const pythonPath = await resolveTool("python3", runnerPath);
   const nodePath = process.execPath;
   const root = await (0, import_promises2.mkdtemp)((0, import_node_path3.join)(tempRoot, ROOT_PREFIX));
   await (0, import_promises2.chmod)(root, 448);
@@ -55937,7 +55948,7 @@ async function setupRuntime(options) {
   const home = (0, import_node_path3.join)(root, "home");
   const codexHome = (0, import_node_path3.join)(root, "codex-home");
   const stateDirectory = (0, import_node_path3.join)(root, "state");
-  const paths = { root, home, codexHome, stateDirectory, runnerPath: process.env.PATH ?? "/usr/bin:/bin" };
+  const paths = { root, home, codexHome, stateDirectory, runnerPath, runnerTrackingId };
   try {
     for (const dir of [home, codexHome, stateDirectory, (0, import_node_path3.join)(root, "tmp"), (0, import_node_path3.join)(root, "bin"), (0, import_node_path3.join)(root, "install")]) await (0, import_promises2.mkdir)(dir, { mode: 448 });
     await (0, import_promises2.symlink)(nodePath, (0, import_node_path3.join)(root, "bin", "node"));
@@ -62456,7 +62467,7 @@ function calculateQueryParameters(operationSpec, operationArguments, fallbackObj
       let queryParameterValue = getOperationArgumentValueFromParameter(operationArguments, queryParameter, fallbackObject);
       if (queryParameterValue !== void 0 && queryParameterValue !== null || queryParameter.mapper.required) {
         queryParameterValue = operationSpec.serializer.serialize(queryParameter.mapper, queryParameterValue, getPathStringFromParameter(queryParameter));
-        const delimiter3 = queryParameter.collectionFormat ? CollectionFormatToDelimiterMap[queryParameter.collectionFormat] : "";
+        const delimiter4 = queryParameter.collectionFormat ? CollectionFormatToDelimiterMap[queryParameter.collectionFormat] : "";
         if (Array.isArray(queryParameterValue)) {
           queryParameterValue = queryParameterValue.map((item) => {
             if (item === null || item === void 0) {
@@ -62468,7 +62479,7 @@ function calculateQueryParameters(operationSpec, operationArguments, fallbackObj
         if (queryParameter.collectionFormat === "Multi" && queryParameterValue.length === 0) {
           continue;
         } else if (Array.isArray(queryParameterValue) && (queryParameter.collectionFormat === "SSV" || queryParameter.collectionFormat === "TSV")) {
-          queryParameterValue = queryParameterValue.join(delimiter3);
+          queryParameterValue = queryParameterValue.join(delimiter4);
         }
         if (!queryParameter.skipEncoding) {
           if (Array.isArray(queryParameterValue)) {
@@ -62480,7 +62491,7 @@ function calculateQueryParameters(operationSpec, operationArguments, fallbackObj
           }
         }
         if (Array.isArray(queryParameterValue) && (queryParameter.collectionFormat === "CSV" || queryParameter.collectionFormat === "Pipes")) {
-          queryParameterValue = queryParameterValue.join(delimiter3);
+          queryParameterValue = queryParameterValue.join(delimiter4);
         }
         result.set(queryParameter.mapper.serializedName || getPathStringFromParameter(queryParameter), queryParameterValue);
       }
@@ -82389,7 +82400,7 @@ var startFrom = {
     }
   }
 };
-var delimiter2 = {
+var delimiter3 = {
   parameterPath: "delimiter",
   mapper: {
     serializedName: "delimiter",
@@ -83975,8 +83986,8 @@ var ContainerImpl = class {
    *                  character or a string.
    * @param options The options parameters.
    */
-  listBlobHierarchySegment(delimiter3, options) {
-    return this.client.sendOperationRequest({ delimiter: delimiter3, options }, listBlobHierarchySegmentOperationSpec);
+  listBlobHierarchySegment(delimiter4, options) {
+    return this.client.sendOperationRequest({ delimiter: delimiter4, options }, listBlobHierarchySegmentOperationSpec);
   }
   /**
    * Returns the sku name and account kind
@@ -84494,7 +84505,7 @@ var listBlobHierarchySegmentOperationSpec = {
     restype2,
     include1,
     startFrom,
-    delimiter2
+    delimiter3
   ],
   urlParameters: [url],
   headerParameters: [

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { parseInputs, scanArguments } from '../src/inputs.js';
 import { analyzeResults } from '../src/results.js';
-import { checkPython, resolveTool, runtimeEnvironment } from '../src/runtime.js';
+import { captureRunnerPath, checkPython, resolveTool, runtimeEnvironment } from '../src/runtime.js';
 import runtimeManifest from '../runtime/package.json' with { type: 'json' };
 
 const cliPackage = resolve(import.meta.dirname, '../runtime/node_modules/@openai/codex-security');
@@ -122,13 +122,22 @@ try {
   const venv = join(root, 'venv');
   execFileSync(python, ['-m', 'venv', '--without-pip', venv], {env, stdio:['ignore','pipe','pipe']});
   const venvPython = join(venv, 'bin', 'python3');
+  const runnerPath = captureRunnerPath(['venv/bin', '', env.PATH ?? '/usr/bin:/bin'].join(delimiter), root);
+  assert.equal(await resolveTool('python3', runnerPath), venvPython);
   const venvEnv = runtimeEnvironment({root, home, codexHome:env.CODEX_HOME, stateDirectory:env.CODEX_SECURITY_STATE_DIR,
-    runnerPath:[join(venv, 'bin'), env.PATH].filter(Boolean).join(delimiter)});
+    runnerPath, runnerTrackingId:'synthetic-cli-job'});
   await checkPython(venvPython, root, venvEnv);
-  const { resolvePluginPython } = await import(join(cliPackage, 'dist/runtime.js'));
-  const selectedPython = await resolvePluginPython({environment:venvEnv, protectedRoot:repository});
-  assert.equal(selectedPython, venvPython);
-  assert.equal(execFileSync(selectedPython, ['-I', '-c', 'import sys; print(sys.prefix)'], {env:venvEnv, encoding:'utf8'}).trim(), venv);
+  const selected = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', `
+    import { execFileSync } from 'node:child_process';
+    const { resolvePluginPython } = await import(process.argv[1]);
+    const python = await resolvePluginPython({environment:process.env, protectedRoot:process.cwd()});
+    console.log(JSON.stringify({python,
+      prefix:execFileSync(python, ['-I', '-c', 'import sys; print(sys.prefix)'], {encoding:'utf8'}).trim(),
+      tracking:process.env.RUNNER_TRACKING_ID}));
+  `, join(cliPackage, 'dist/runtime.js')], {cwd:repository, env:venvEnv, encoding:'utf8'}));
+  assert.equal(selected.python, venvPython);
+  assert.equal(selected.prefix, venv);
+  assert.equal(selected.tracking, 'synthetic-cli-job');
   const venvArguments = scanArguments(parseInputs(name => deepInputs[name] ?? '', repository),
     {repository}, join(root, 'venv-results'));
   assert.equal(JSON.parse(run(venvArguments, 0, venvEnv)).dryRun, true);

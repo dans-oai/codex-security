@@ -24,6 +24,17 @@ async function fixture(t: any) {
   const inputs = (values: Record<string,string>={scope:'diff'}) => parseInputs(key=>values[key]??'',path);
   return {path,run,base,change,event,inputs};
 }
+test('Git children retain the runner process-tracking marker', async t => {
+  const f = await fixture(t);
+  const previous = process.env.RUNNER_TRACKING_ID;
+  t.after(() => {
+    if (previous === undefined) delete process.env.RUNNER_TRACKING_ID;
+    else process.env.RUNNER_TRACKING_ID = previous;
+  });
+  process.env.RUNNER_TRACKING_ID = 'synthetic-git-runner-tracking';
+  f.run('config', 'alias.capture-tracking', '!printf "%s" "$RUNNER_TRACKING_ID"');
+  assert.equal(await git(f.path, ['capture-tracking']), 'synthetic-git-runner-tracking');
+});
 test('PR target resolves merge base and preserves exact upload head identity', async t => {
   const f=await fixture(t); const head=await f.change();
   f.run('checkout','-b','updated-base',f.base);
