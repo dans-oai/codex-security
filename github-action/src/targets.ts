@@ -90,7 +90,8 @@ export async function resolveTarget(inputs: Inputs, event: EventContext): Promis
   const repository = await realpath(resolve(inputs.repository));
   if ((await git(repository, ['rev-parse', '--show-toplevel'])).trim() !== repository)
     throw new Error('repository must point to the checkout root. Use paths for folders within it.');
-  const configKeys = (await git(repository, ['config', '--local', '--no-includes', '--name-only', '--list'])).toLowerCase().split('\n');
+  const configKeys = (await git(repository, ['config', '--show-scope', '--no-includes', '--name-only', '--list']))
+    .toLowerCase().split('\n').filter(key => /^(?:local|worktree)\t/.test(key)).map(key => key.slice(key.indexOf('\t') + 1));
   if (configKeys.some(key => /^credential\.|^http\..*extraheader$|^include\.path$|^includeif\..*\.path$|^core\.sshcommand$|^url\..*\.insteadof$/.test(key)))
     throw new Error('The checkout retains Git authentication or external configuration. Use actions/checkout with persist-credentials: false and a dedicated clean job. Credential values have not been printed.');
   const origin = (await git(repository, ['config', '--no-includes', '--get', 'remote.origin.url'])).trim();

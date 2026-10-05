@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, writeFile, readFile, realpath, symlink, rm, stat } from
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { captureRunnerPath, checkPython, cleanupRuntime, resolveTool, runtimeEnvironment, setupRuntime } from '../src/runtime.js';
+import { captureRunnerPath, checkPython, cleanupRuntime, resolveTool, runtimeEnvironment, setupRuntime, writePythonLauncher } from '../src/runtime.js';
 import { runProcess } from '../src/process.js';
 
 test('tool discovery preserves the selected PATH launcher spelling', async (t) => {
@@ -48,11 +48,14 @@ test('runtime installation accepts npm shell shims and uses the Action Node exec
   const python = await resolveTool('python3');
   const previousPath = process.env.PATH;
   const previousTrackingId = process.env.RUNNER_TRACKING_ID;
+  const previousLibraryPath = process.env.LD_LIBRARY_PATH;
   t.after(async () => {
     if (previousPath === undefined) delete process.env.PATH;
     else process.env.PATH = previousPath;
     if (previousTrackingId === undefined) delete process.env.RUNNER_TRACKING_ID;
     else process.env.RUNNER_TRACKING_ID = previousTrackingId;
+    if (previousLibraryPath === undefined) delete process.env.LD_LIBRARY_PATH;
+    else process.env.LD_LIBRARY_PATH = previousLibraryPath;
     await rm(root, { recursive: true, force: true });
   });
   const bin = join(root, 'tools');
@@ -73,6 +76,8 @@ NODE
 `, {mode:0o755});
   process.env.PATH = `${relative(process.cwd(), bin)}:`;
   process.env.RUNNER_TRACKING_ID = 'synthetic-first-job';
+  const libraryPath = (previousLibraryPath === undefined ? '' : previousLibraryPath + ':') + '/synthetic-first-library';
+  process.env.LD_LIBRARY_PATH = libraryPath;
   const captured = captureRunnerPath();
   const runtime = await setupRuntime({actionRoot:fileURLToPath(new URL('../', import.meta.url)), tempRoot:root});
   const invocation = JSON.parse(await readFile(join(runtime.root, 'install', 'npm-invocation.json'), 'utf8'));
@@ -84,11 +89,14 @@ NODE
   assert.ok(invocation.args.includes('--registry=https://registry.npmjs.org/'));
   assert.equal(invocation.env.PATH, `${join(runtime.root, 'bin')}:${captured}`);
   assert.equal(invocation.env.RUNNER_TRACKING_ID, 'synthetic-first-job');
+  assert.equal(invocation.env.LD_LIBRARY_PATH, libraryPath);
   assert.equal(invocation.env.OPENAI_API_KEY, undefined);
   assert.equal(invocation.env.ACTIONS_RUNTIME_TOKEN, undefined);
   assert.equal(runtime.env('synthetic-scan-key').PYTHON, 'python3');
   process.env.RUNNER_TRACKING_ID = 'synthetic-later-job';
+  process.env.LD_LIBRARY_PATH = '/synthetic-later-library';
   assert.equal(runtime.env('synthetic-scan-key').RUNNER_TRACKING_ID, 'synthetic-first-job');
+  assert.equal(runtime.env('synthetic-scan-key').LD_LIBRARY_PATH, libraryPath);
   await cleanupRuntime(runtime.root, root);
 });
 
@@ -101,7 +109,7 @@ test('Python launcher selection and preflight preserve virtualenv context', asyn
   const runnerPath = captureRunnerPath('venv/bin::/usr/bin:/bin', root);
   const python = await resolveTool('python3', runnerPath);
   assert.equal(python, join(bin, 'python3'));
-  const env = runtimeEnvironment({root, home:root, codexHome:root, stateDirectory:root, runnerPath});
+  const env = runtimeEnvironment({root, home:root, codexHome:root, stateDirectory:root, runnerPath, runnerLibraryPath:process.env.LD_LIBRARY_PATH});
   await checkPython(python, root, env);
   const result = await runProcess(python, ['-I', '-c', 'import sys; print(sys.prefix)'], {cwd:root, env});
   assert.equal(result.stdout.trim(), venv);
@@ -110,6 +118,26 @@ test('Python launcher selection and preflight preserve virtualenv context', asyn
   const child = await runProcess('/bin/sh', ['-c', 'python3 -I -c "import sys; print(sys.prefix)"'], {cwd:repository, env});
   assert.equal(child.stdout.trim(), venv);
   assert.equal(env.PYTHON, 'python3');
+});
+
+test('private Python launcher restores loader settings and preserves virtualenv and literal arguments', async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'runtime-python-loader-')));
+  t.after(() => rm(root, {recursive:true, force:true}));
+  const venv = join(root, "venv 'quoted' $literal");
+  execFileSync(await resolveTool('python3'), ['-m', 'venv', '--without-pip', venv], {stdio:['ignore','pipe','pipe']});
+  await mkdir(join(root, 'bin'));
+  const launcher = join(root, 'bin', 'python3');
+  const libraryPath = (process.env.LD_LIBRARY_PATH === undefined ? '' : process.env.LD_LIBRARY_PATH + ':') + "/synthetic/libs 'quoted' $literal;\nnext";
+  await writePythonLauncher(launcher, join(venv, 'bin', 'python3'), libraryPath);
+  const env = runtimeEnvironment({root, home:root, codexHome:root, stateDirectory:root, runnerLibraryPath:libraryPath});
+  const arguments_ = ["literal 'quotes'", '$literal; argument', '--option', '', 'two\nlines'];
+  for (const loader of [undefined, '/another-library']) {
+    const result = await runProcess(launcher, ['-I', '-c',
+      'import json,os,sys; print(json.dumps(dict(prefix=sys.prefix,loader=os.environ.get("LD_LIBRARY_PATH"),args=sys.argv[1:])))',
+      ...arguments_], {cwd:root, env:{...env, LD_LIBRARY_PATH:loader}});
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), {prefix:venv, loader:libraryPath, args:arguments_});
+  }
 });
 
 test('Python preflight checks the required version and modules in an isolated process', async (t) => {
@@ -169,9 +197,9 @@ test('each scan retains its runner tool path while keeping its environment isola
   await mkdir(tools);
   const tool = join(tools, 'synthetic-tool');
   await writeFile(tool, '#!/bin/sh\nprintf selected-runner-tool\n', { mode: 0o755 });
-  const paths = { root, home: root, codexHome: root, stateDirectory: root, runnerPath: tools, runnerTrackingId:'synthetic-first-job' };
+  const paths = { root, home: root, codexHome: root, stateDirectory: root, runnerPath: tools, runnerTrackingId:'synthetic-first-job', runnerLibraryPath:'/synthetic-first-library' };
   const first = runtimeEnvironment(paths, 'first-scan-key');
-  const second = runtimeEnvironment({...paths, runnerPath:'/other/tools', runnerTrackingId:'synthetic-second-job'}, 'second-scan-key');
+  const second = runtimeEnvironment({...paths, runnerPath:'/other/tools', runnerTrackingId:'synthetic-second-job', runnerLibraryPath:'/synthetic-second-library'}, 'second-scan-key');
   const result = await runProcess('/bin/sh', ['-c', 'synthetic-tool'], {cwd:root, env:first});
   assert.equal(result.stdout, 'selected-runner-tool');
   assert.equal(first.PATH, `${join(root, 'bin')}:${tools}`);
@@ -180,6 +208,10 @@ test('each scan retains its runner tool path while keeping its environment isola
   assert.equal(second.OPENAI_API_KEY, 'second-scan-key');
   assert.equal(first.RUNNER_TRACKING_ID, 'synthetic-first-job');
   assert.equal(second.RUNNER_TRACKING_ID, 'synthetic-second-job');
+  assert.equal(first.LD_LIBRARY_PATH, '/synthetic-first-library');
+  assert.equal(second.LD_LIBRARY_PATH, '/synthetic-second-library');
+  assert.equal(runtimeEnvironment({...paths, runnerLibraryPath:undefined}).LD_LIBRARY_PATH, undefined);
+  assert.equal(runtimeEnvironment({...paths, runnerLibraryPath:''}).LD_LIBRARY_PATH, '');
   assert.equal(runtimeEnvironment({...paths, runnerTrackingId:undefined}).RUNNER_TRACKING_ID, undefined);
 });
 

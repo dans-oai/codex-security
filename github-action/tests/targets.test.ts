@@ -121,6 +121,29 @@ test('persisted Git credentials and origin userinfo are refused without revealin
   await assert.rejects(resolveTarget(f.inputs(),f.event(f.base)),error=>/origin/.test(String(error))&&!String(error).includes('CANARY'));
 });
 
+test('worktree configuration is optional and clean linked checkouts are accepted', async t => {
+  const f = await fixture(t);
+  f.run('config', 'extensions.worktreeConfig', 'true');
+  assert.equal((await resolveTarget(f.inputs(), f.event(f.base))).scannedSha, f.base);
+  const root = await mkdtemp(join(tmpdir(), 'action-linked-worktree-'));
+  t.after(() => rm(root, {recursive:true, force:true}));
+  const checkout = join(root, 'checkout');
+  f.run('worktree', 'add', '--detach', checkout, f.base);
+  f.run('-C', checkout, 'config', '--worktree', 'core.editor', 'synthetic-editor');
+  const inputs = {...f.inputs({scope:'repository'}), repository:checkout};
+  const target = await resolveTarget(inputs, f.event(f.base, 'schedule'));
+  assert.equal(target.repository, await realpath(checkout));
+  assert.equal(target.scannedSha, f.base);
+  for (const [key, value] of [
+    ['http.https://github.com/.extraheader', 'AUTHORIZATION: bearer synthetic-worktree-key'],
+    ['include.path', join(f.path, 'synthetic-external-config')],
+  ]) {
+    f.run('-C', checkout, 'config', '--worktree', key, value);
+    await assert.rejects(resolveTarget(inputs, f.event(f.base, 'schedule')), /persist-credentials/);
+    f.run('-C', checkout, 'config', '--worktree', '--unset', key);
+  }
+});
+
 test('Git failures preserve diagnostic details', async t => {
   const f = await fixture(t);
   await assert.rejects(git(f.path, ['show', 'missing-synthetic-revision']), /unknown revision|ambiguous argument/);

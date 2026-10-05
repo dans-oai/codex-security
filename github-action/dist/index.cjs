@@ -55821,7 +55821,7 @@ async function resolveTarget(inputs, event) {
   const repository = await (0, import_promises.realpath)((0, import_node_path2.resolve)(inputs.repository));
   if ((await git(repository, ["rev-parse", "--show-toplevel"])).trim() !== repository)
     throw new Error("repository must point to the checkout root. Use paths for folders within it.");
-  const configKeys = (await git(repository, ["config", "--local", "--no-includes", "--name-only", "--list"])).toLowerCase().split("\n");
+  const configKeys = (await git(repository, ["config", "--show-scope", "--no-includes", "--name-only", "--list"])).toLowerCase().split("\n").filter((key) => /^(?:local|worktree)\t/.test(key)).map((key) => key.slice(key.indexOf("	") + 1));
   if (configKeys.some((key) => /^credential\.|^http\..*extraheader$|^include\.path$|^includeif\..*\.path$|^core\.sshcommand$|^url\..*\.insteadof$/.test(key)))
     throw new Error("The checkout retains Git authentication or external configuration. Use actions/checkout with persist-credentials: false and a dedicated clean job. Credential values have not been printed.");
   const origin = (await git(repository, ["config", "--no-includes", "--get", "remote.origin.url"])).trim();
@@ -55904,6 +55904,7 @@ function runtimeEnvironment(paths, apiKey) {
     GIT_CONFIG_VALUE_3: "/bin/false"
   };
   if (paths.runnerTrackingId !== void 0) env.RUNNER_TRACKING_ID = paths.runnerTrackingId;
+  if (paths.runnerLibraryPath !== void 0) env.LD_LIBRARY_PATH = paths.runnerLibraryPath;
   if (apiKey !== void 0) {
     if (!apiKey || /[\r\n\u0000]/.test(apiKey)) throw new Error("OPENAI_API_KEY must be a nonempty single-line value.");
     env.OPENAI_API_KEY = apiKey;
@@ -55931,12 +55932,20 @@ async function checkPython(pythonPath, cwd, env) {
   if (result.exitCode !== 0 || result.timedOut || result.interrupted || result.signal)
     throw new Error("Python 3.11 or later with sqlite3 and tomllib is required. Use actions/setup-python to select a compatible interpreter.");
 }
+async function writePythonLauncher(path6, pythonPath, libraryPath) {
+  const quote = (value) => "'" + value.replaceAll("'", "'\\''") + "'";
+  await (0, import_promises2.writeFile)(path6, `#!/bin/sh
+export LD_LIBRARY_PATH=${quote(libraryPath)}
+exec ${quote(pythonPath)} "$@"
+`, { mode: 448, flag: "wx" });
+}
 async function setupRuntime(options) {
   if (process.platform !== "linux" || process.arch !== "x64") throw new Error("Codex Security Action currently supports Linux x64 runners only.");
   if (Number(process.versions.node.split(".")[0]) !== 24) throw new Error("Codex Security Action requires the Node 24 GitHub Actions runtime.");
   if (!(0, import_node_path3.isAbsolute)(options.actionRoot) || !(0, import_node_path3.isAbsolute)(options.tempRoot)) throw new Error("Action and temporary roots must be absolute.");
   const runnerPath = captureRunnerPath();
   const runnerTrackingId = process.env.RUNNER_TRACKING_ID;
+  const runnerLibraryPath = process.env.LD_LIBRARY_PATH;
   const tempRoot = await (0, import_promises2.realpath)(options.tempRoot);
   const actionRoot = await (0, import_promises2.realpath)(options.actionRoot);
   const npmPath = await resolveTool("npm", runnerPath);
@@ -55948,10 +55957,11 @@ async function setupRuntime(options) {
   const home = (0, import_node_path3.join)(root, "home");
   const codexHome = (0, import_node_path3.join)(root, "codex-home");
   const stateDirectory = (0, import_node_path3.join)(root, "state");
-  const paths = { root, home, codexHome, stateDirectory, runnerPath, runnerTrackingId };
+  const paths = { root, home, codexHome, stateDirectory, runnerPath, runnerTrackingId, runnerLibraryPath };
   try {
     for (const dir of [home, codexHome, stateDirectory, (0, import_node_path3.join)(root, "tmp"), (0, import_node_path3.join)(root, "bin"), (0, import_node_path3.join)(root, "install")]) await (0, import_promises2.mkdir)(dir, { mode: 448 });
     await (0, import_promises2.symlink)(nodePath, (0, import_node_path3.join)(root, "bin", "node"));
+    if (runnerLibraryPath !== void 0) await writePythonLauncher((0, import_node_path3.join)(root, "bin", "python3"), pythonPath, runnerLibraryPath);
     const env = runtimeEnvironment(paths);
     await checkPython(pythonPath, root, env);
     const source = (0, import_node_path3.join)(actionRoot, "runtime");

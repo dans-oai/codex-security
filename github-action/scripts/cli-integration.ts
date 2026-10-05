@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { parseInputs, scanArguments } from '../src/inputs.js';
 import { analyzeResults } from '../src/results.js';
-import { captureRunnerPath, checkPython, resolveTool, runtimeEnvironment } from '../src/runtime.js';
+import { captureRunnerPath, checkPython, resolveTool, runtimeEnvironment, writePythonLauncher } from '../src/runtime.js';
 import runtimeManifest from '../runtime/package.json' with { type: 'json' };
 
 const cliPackage = resolve(import.meta.dirname, '../runtime/node_modules/@openai/codex-security');
@@ -19,8 +19,8 @@ try {
   const home = join(root, 'home');
   await mkdir(repository);
   await mkdir(home);
-  // Pass only executable lookup and isolated homes. Never inherit API keys or user configuration.
-  const env = { PATH: process.env.PATH, HOME: home, CI: 'true', NO_COLOR: '1',
+  // Pass runner tool lookup/loader settings and isolated homes, without credentials or user configuration.
+  const env = { PATH: process.env.PATH, LD_LIBRARY_PATH:process.env.LD_LIBRARY_PATH, HOME: home, CI: 'true', NO_COLOR: '1',
     CODEX_HOME: join(home, '.codex'), CODEX_SECURITY_STATE_DIR: join(root, 'state'),
     GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' };
   const git = (...args: string[]) => execFileSync('git', [
@@ -124,23 +124,36 @@ try {
   const venvPython = join(venv, 'bin', 'python3');
   const runnerPath = captureRunnerPath(['venv/bin', '', env.PATH ?? '/usr/bin:/bin'].join(delimiter), root);
   assert.equal(await resolveTool('python3', runnerPath), venvPython);
+  const libraryPath = (env.LD_LIBRARY_PATH === undefined ? '' : env.LD_LIBRARY_PATH + ':') + join(root, "loader 'quoted' $literal");
+  await mkdir(join(root, 'bin'));
+  const pythonLauncher = join(root, 'bin', 'python3');
+  await writePythonLauncher(pythonLauncher, venvPython, libraryPath);
   const venvEnv = runtimeEnvironment({root, home, codexHome:env.CODEX_HOME, stateDirectory:env.CODEX_SECURITY_STATE_DIR,
-    runnerPath, runnerTrackingId:'synthetic-cli-job'});
+    runnerPath, runnerTrackingId:'synthetic-cli-job', runnerLibraryPath:libraryPath});
   await checkPython(venvPython, root, venvEnv);
   const selected = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', `
     import { execFileSync } from 'node:child_process';
     const { resolvePluginPython } = await import(process.argv[1]);
     const python = await resolvePluginPython({environment:process.env, protectedRoot:process.cwd()});
     console.log(JSON.stringify({python,
-      prefix:execFileSync(python, ['-I', '-c', 'import sys; print(sys.prefix)'], {encoding:'utf8'}).trim(),
+      ...JSON.parse(execFileSync(python, ['-I', '-c', 'import json,os,sys; print(json.dumps(dict(prefix=sys.prefix,loader=os.environ.get("LD_LIBRARY_PATH"))))'],
+        {encoding:'utf8', env:{...process.env, LD_LIBRARY_PATH:undefined}})),
       tracking:process.env.RUNNER_TRACKING_ID}));
   `, join(cliPackage, 'dist/runtime.js')], {cwd:repository, env:venvEnv, encoding:'utf8'}));
-  assert.equal(selected.python, venvPython);
+  assert.equal(selected.python, pythonLauncher);
   assert.equal(selected.prefix, venv);
+  assert.equal(selected.loader, libraryPath);
   assert.equal(selected.tracking, 'synthetic-cli-job');
+  // The actual pinned helper must still work when an MCP-style child drops the loader variable.
+  const strippedEnv = {...venvEnv, LD_LIBRARY_PATH:undefined};
+  const loaderSourceInput = join(root, 'loader-source.jsonl');
+  execFileSync(selected.python, [join(cliPackage, '_bundled_plugin/scripts/generate_rank_input.py'),
+    'make-repo-scope-input', '--repo', repository, '--scopes-file', scopesFile, '--out', loaderSourceInput],
+    {cwd:repository, env:strippedEnv, stdio:['ignore','pipe','pipe']});
+  assert.equal(await readFile(loaderSourceInput, 'utf8'), await readFile(sourceInput, 'utf8'));
   const venvArguments = scanArguments(parseInputs(name => deepInputs[name] ?? '', repository),
     {repository}, join(root, 'venv-results'));
-  assert.equal(JSON.parse(run(venvArguments, 0, venvEnv)).dryRun, true);
+  assert.equal(JSON.parse(run(venvArguments, 0, strippedEnv)).dryRun, true);
 
   // The CLI owns scan validation: an output directory inside the source checkout is forbidden.
   const resultsDirectory = join(repository, 'results');

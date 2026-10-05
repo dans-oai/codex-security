@@ -24,11 +24,12 @@ export interface Runtime {
   resultsDirectory: string;
   runnerPath?: string;
   runnerTrackingId?: string;
+  runnerLibraryPath?: string;
   env: (apiKey: string) => NodeJS.ProcessEnv;
 }
 
 /** Deliberately construct a new environment: never copy process.env. */
-export function runtimeEnvironment(paths: Pick<Runtime, 'root' | 'home' | 'codexHome' | 'stateDirectory' | 'runnerPath' | 'runnerTrackingId'>, apiKey?: string): NodeJS.ProcessEnv {
+export function runtimeEnvironment(paths: Pick<Runtime, 'root' | 'home' | 'codexHome' | 'stateDirectory' | 'runnerPath' | 'runnerTrackingId' | 'runnerLibraryPath'>, apiKey?: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     PATH: `${join(paths.root, 'bin')}:${paths.runnerPath ?? '/usr/bin:/bin'}`,
     HOME: paths.home, CODEX_HOME: paths.codexHome,
@@ -47,6 +48,7 @@ export function runtimeEnvironment(paths: Pick<Runtime, 'root' | 'home' | 'codex
     GIT_CONFIG_KEY_3: 'core.askPass', GIT_CONFIG_VALUE_3: '/bin/false',
   };
   if (paths.runnerTrackingId !== undefined) env.RUNNER_TRACKING_ID = paths.runnerTrackingId;
+  if (paths.runnerLibraryPath !== undefined) env.LD_LIBRARY_PATH = paths.runnerLibraryPath;
   if (apiKey !== undefined) {
     if (!apiKey || /[\r\n\u0000]/.test(apiKey)) throw new Error('OPENAI_API_KEY must be a nonempty single-line value.');
     env.OPENAI_API_KEY = apiKey;
@@ -81,12 +83,19 @@ export async function checkPython(pythonPath: string, cwd: string, env: NodeJS.P
     throw new Error('Python 3.11 or later with sqlite3 and tomllib is required. Use actions/setup-python to select a compatible interpreter.');
 }
 
+/** Keep relocated Python usable after Codex clears an MCP child's environment. */
+export async function writePythonLauncher(path: string, pythonPath: string, libraryPath: string): Promise<void> {
+  const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
+  await writeFile(path, `#!/bin/sh\nexport LD_LIBRARY_PATH=${quote(libraryPath)}\nexec ${quote(pythonPath)} "$@"\n`, { mode: 0o700, flag: 'wx' });
+}
+
 export async function setupRuntime(options: RuntimeOptions): Promise<Runtime> {
   if (process.platform !== 'linux' || process.arch !== 'x64') throw new Error('Codex Security Action currently supports Linux x64 runners only.');
   if (Number(process.versions.node.split('.')[0]) !== 24) throw new Error('Codex Security Action requires the Node 24 GitHub Actions runtime.');
   if (!isAbsolute(options.actionRoot) || !isAbsolute(options.tempRoot)) throw new Error('Action and temporary roots must be absolute.');
   const runnerPath = captureRunnerPath();
   const runnerTrackingId = process.env.RUNNER_TRACKING_ID;
+  const runnerLibraryPath = process.env.LD_LIBRARY_PATH;
   const tempRoot = await realpath(options.tempRoot);
   const actionRoot = await realpath(options.actionRoot);
   const npmPath = await resolveTool('npm', runnerPath);
@@ -98,10 +107,11 @@ export async function setupRuntime(options: RuntimeOptions): Promise<Runtime> {
   const home = join(root, 'home');
   const codexHome = join(root, 'codex-home');
   const stateDirectory = join(root, 'state');
-  const paths = { root, home, codexHome, stateDirectory, runnerPath, runnerTrackingId };
+  const paths = { root, home, codexHome, stateDirectory, runnerPath, runnerTrackingId, runnerLibraryPath };
   try {
     for (const dir of [home, codexHome, stateDirectory, join(root, 'tmp'), join(root, 'bin'), join(root, 'install')]) await mkdir(dir, { mode: 0o700 });
     await symlink(nodePath, join(root, 'bin', 'node'));
+    if (runnerLibraryPath !== undefined) await writePythonLauncher(join(root, 'bin', 'python3'), pythonPath, runnerLibraryPath);
     const env = runtimeEnvironment(paths);
     await checkPython(pythonPath, root, env);
     const source = join(actionRoot, 'runtime');
