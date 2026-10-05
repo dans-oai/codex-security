@@ -126,6 +126,7 @@ try {
   assert.equal(await resolveTool('python3', runnerPath), venvPython);
   const libraryPath = (env.LD_LIBRARY_PATH === undefined ? '' : env.LD_LIBRARY_PATH + ':') + join(root, "loader 'quoted' $literal");
   await mkdir(join(root, 'bin'));
+  await mkdir(join(root, 'tmp'));
   const pythonLauncher = join(root, 'bin', 'python3');
   await writeRuntimeLauncher(pythonLauncher, venvPython, 'LD_LIBRARY_PATH', libraryPath);
   const nodeLauncher = join(root, 'bin', 'node');
