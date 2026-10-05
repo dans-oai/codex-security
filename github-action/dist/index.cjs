@@ -5719,7 +5719,7 @@ var require_client_h1 = __commonJS({
       kResume,
       kHTTPContext
     } = require_symbols();
-    var constants5 = require_constants2();
+    var constants4 = require_constants2();
     var EMPTY_BUF = Buffer.alloc(0);
     var FastBuffer = Buffer[Symbol.species];
     var addListener = util3.addListener;
@@ -5794,7 +5794,7 @@ var require_client_h1 = __commonJS({
       constructor(client2, socket, { exports: exports3 }) {
         assert(Number.isFinite(client2[kMaxHeadersSize]) && client2[kMaxHeadersSize] > 0);
         this.llhttp = exports3;
-        this.ptr = this.llhttp.llhttp_alloc(constants5.TYPE.RESPONSE);
+        this.ptr = this.llhttp.llhttp_alloc(constants4.TYPE.RESPONSE);
         this.client = client2;
         this.socket = socket;
         this.timeout = null;
@@ -5889,11 +5889,11 @@ var require_client_h1 = __commonJS({
             currentBufferRef = null;
           }
           const offset = llhttp.llhttp_get_error_pos(this.ptr) - currentBufferPtr;
-          if (ret !== constants5.ERROR.OK) {
+          if (ret !== constants4.ERROR.OK) {
             const body2 = data.subarray(offset);
-            if (ret === constants5.ERROR.PAUSED_UPGRADE) {
+            if (ret === constants4.ERROR.PAUSED_UPGRADE) {
               this.onUpgrade(body2);
-            } else if (ret === constants5.ERROR.PAUSED) {
+            } else if (ret === constants4.ERROR.PAUSED) {
               this.paused = true;
               socket.unshift(body2);
             } else {
@@ -5916,10 +5916,10 @@ var require_client_h1 = __commonJS({
         } finally {
           currentParser = null;
         }
-        if (ret === constants5.ERROR.OK) {
+        if (ret === constants4.ERROR.OK) {
           return null;
         }
-        if (ret === constants5.ERROR.PAUSED || ret === constants5.ERROR.PAUSED_UPGRADE) {
+        if (ret === constants4.ERROR.PAUSED || ret === constants4.ERROR.PAUSED_UPGRADE) {
           this.paused = true;
           return null;
         }
@@ -5936,7 +5936,7 @@ var require_client_h1 = __commonJS({
           const len = new Uint8Array(llhttp.memory.buffer, ptr).indexOf(0);
           message = "Response does not match the HTTP/1.1 protocol (" + Buffer.from(llhttp.memory.buffer, ptr, len).toString() + ")";
         }
-        return new HTTPParserError(message, constants5.ERROR[ret], data);
+        return new HTTPParserError(message, constants4.ERROR[ret], data);
       }
       destroy() {
         assert(this.ptr != null);
@@ -6115,7 +6115,7 @@ var require_client_h1 = __commonJS({
           socket[kBlocking] = false;
           client2[kResume]();
         }
-        return pause ? constants5.ERROR.PAUSED : 0;
+        return pause ? constants4.ERROR.PAUSED : 0;
       }
       onBody(buf) {
         const { client: client2, socket, statusCode, maxResponseSize } = this;
@@ -6137,7 +6137,7 @@ var require_client_h1 = __commonJS({
         }
         this.bytesRead += buf.length;
         if (request2.onData(buf) === false) {
-          return constants5.ERROR.PAUSED;
+          return constants4.ERROR.PAUSED;
         }
       }
       onMessageComplete() {
@@ -6173,13 +6173,13 @@ var require_client_h1 = __commonJS({
         if (socket[kWriting]) {
           assert(client2[kRunning] === 0);
           util3.destroy(socket, new InformationalError("reset"));
-          return constants5.ERROR.PAUSED;
+          return constants4.ERROR.PAUSED;
         } else if (!shouldKeepAlive) {
           util3.destroy(socket, new InformationalError("reset"));
-          return constants5.ERROR.PAUSED;
+          return constants4.ERROR.PAUSED;
         } else if (socket[kReset] && client2[kRunning] === 0) {
           util3.destroy(socket, new InformationalError("reset"));
-          return constants5.ERROR.PAUSED;
+          return constants4.ERROR.PAUSED;
         } else if (client2[kPipelining] == null || client2[kPipelining] === 1) {
           setImmediate(() => client2[kResume]());
         } else {
@@ -27600,7 +27600,7 @@ var require_async = __commonJS({
 // node_modules/graceful-fs/polyfills.js
 var require_polyfills = __commonJS({
   "node_modules/graceful-fs/polyfills.js"(exports2, module2) {
-    var constants5 = require("constants");
+    var constants4 = require("constants");
     var origCwd = process.cwd;
     var cwd = null;
     var platform2 = process.env.GRACEFUL_FS_PLATFORM || process.platform;
@@ -27624,7 +27624,7 @@ var require_polyfills = __commonJS({
     var chdir;
     module2.exports = patch;
     function patch(fs8) {
-      if (constants5.hasOwnProperty("O_SYMLINK") && process.version.match(/^v0\.6\.[0-2]|^v0\.5\./)) {
+      if (constants4.hasOwnProperty("O_SYMLINK") && process.version.match(/^v0\.6\.[0-2]|^v0\.5\./)) {
         patchLchmod(fs8);
       }
       if (!fs8.lutimes) {
@@ -27726,7 +27726,7 @@ var require_polyfills = __commonJS({
         fs9.lchmod = function(path6, mode, callback) {
           fs9.open(
             path6,
-            constants5.O_WRONLY | constants5.O_SYMLINK,
+            constants4.O_WRONLY | constants4.O_SYMLINK,
             mode,
             function(err, fd) {
               if (err) {
@@ -27742,7 +27742,7 @@ var require_polyfills = __commonJS({
           );
         };
         fs9.lchmodSync = function(path6, mode) {
-          var fd = fs9.openSync(path6, constants5.O_WRONLY | constants5.O_SYMLINK, mode);
+          var fd = fs9.openSync(path6, constants4.O_WRONLY | constants4.O_SYMLINK, mode);
           var threw = true;
           var ret;
           try {
@@ -27762,9 +27762,9 @@ var require_polyfills = __commonJS({
         };
       }
       function patchLutimes(fs9) {
-        if (constants5.hasOwnProperty("O_SYMLINK") && fs9.futimes) {
+        if (constants4.hasOwnProperty("O_SYMLINK") && fs9.futimes) {
           fs9.lutimes = function(path6, at, mt, cb) {
-            fs9.open(path6, constants5.O_SYMLINK, function(er, fd) {
+            fs9.open(path6, constants4.O_SYMLINK, function(er, fd) {
               if (er) {
                 if (cb) cb(er);
                 return;
@@ -27777,7 +27777,7 @@ var require_polyfills = __commonJS({
             });
           };
           fs9.lutimesSync = function(path6, at, mt) {
-            var fd = fs9.openSync(path6, constants5.O_SYMLINK);
+            var fd = fs9.openSync(path6, constants4.O_SYMLINK);
             var ret;
             var threw = true;
             try {
@@ -28668,7 +28668,7 @@ var require_BufferList = __commonJS({
         this.head = this.tail = null;
         this.length = 0;
       };
-      BufferList.prototype.join = function join8(s) {
+      BufferList.prototype.join = function join7(s) {
         if (this.length === 0) return "";
         var p = this.head;
         var ret = "" + p.data;
@@ -46346,14 +46346,14 @@ var require_zip_archive_entry = __commonJS({
     var ArchiveEntry = require_archive_entry();
     var GeneralPurposeBit = require_general_purpose_bit();
     var UnixStat = require_unix_stat();
-    var constants5 = require_constants6();
+    var constants4 = require_constants6();
     var zipUtil = require_util11();
     var ZipArchiveEntry = module2.exports = function(name) {
       if (!(this instanceof ZipArchiveEntry)) {
         return new ZipArchiveEntry(name);
       }
       ArchiveEntry.call(this);
-      this.platform = constants5.PLATFORM_FAT;
+      this.platform = constants4.PLATFORM_FAT;
       this.method = -1;
       this.name = null;
       this.size = 0;
@@ -46361,7 +46361,7 @@ var require_zip_archive_entry = __commonJS({
       this.gpb = new GeneralPurposeBit();
       this.crc = 0;
       this.time = -1;
-      this.minver = constants5.MIN_VERSION_INITIAL;
+      this.minver = constants4.MIN_VERSION_INITIAL;
       this.mode = -1;
       this.extra = null;
       this.exattr = 0;
@@ -46388,7 +46388,7 @@ var require_zip_archive_entry = __commonJS({
       return this.exattr;
     };
     ZipArchiveEntry.prototype.getExtra = function() {
-      return this.extra !== null ? this.extra : constants5.EMPTY;
+      return this.extra !== null ? this.extra : constants4.EMPTY;
     };
     ZipArchiveEntry.prototype.getGeneralPurposeBit = function() {
       return this.gpb;
@@ -46421,7 +46421,7 @@ var require_zip_archive_entry = __commonJS({
       return this.time !== -1 ? this.time : 0;
     };
     ZipArchiveEntry.prototype.getUnixMode = function() {
-      return this.platform !== constants5.PLATFORM_UNIX ? 0 : this.getExternalAttributes() >> constants5.SHORT_SHIFT & constants5.SHORT_MASK;
+      return this.platform !== constants4.PLATFORM_UNIX ? 0 : this.getExternalAttributes() >> constants4.SHORT_SHIFT & constants4.SHORT_MASK;
     };
     ZipArchiveEntry.prototype.getVersionNeededToExtract = function() {
       return this.minver;
@@ -46491,12 +46491,12 @@ var require_zip_archive_entry = __commonJS({
       this.time = zipUtil.dateToDos(time, forceLocalTime);
     };
     ZipArchiveEntry.prototype.setUnixMode = function(mode) {
-      mode |= this.isDirectory() ? constants5.S_IFDIR : constants5.S_IFREG;
+      mode |= this.isDirectory() ? constants4.S_IFDIR : constants4.S_IFREG;
       var extattr = 0;
-      extattr |= mode << constants5.SHORT_SHIFT | (this.isDirectory() ? constants5.S_DOS_D : constants5.S_DOS_A);
+      extattr |= mode << constants4.SHORT_SHIFT | (this.isDirectory() ? constants4.S_DOS_D : constants4.S_DOS_A);
       this.setExternalAttributes(extattr);
-      this.mode = mode & constants5.MODE_MASK;
-      this.platform = constants5.PLATFORM_UNIX;
+      this.mode = mode & constants4.MODE_MASK;
+      this.platform = constants4.PLATFORM_UNIX;
     };
     ZipArchiveEntry.prototype.setVersionNeededToExtract = function(minver) {
       this.minver = minver;
@@ -46508,7 +46508,7 @@ var require_zip_archive_entry = __commonJS({
       return (this.getUnixMode() & UnixStat.FILE_TYPE_FLAG) === UnixStat.LINK_FLAG;
     };
     ZipArchiveEntry.prototype.isZip64 = function() {
-      return this.csize > constants5.ZIP64_MAGIC || this.size > constants5.ZIP64_MAGIC;
+      return this.csize > constants4.ZIP64_MAGIC || this.size > constants4.ZIP64_MAGIC;
     };
   }
 });
@@ -46825,7 +46825,7 @@ var require_zip_archive_output_stream = __commonJS({
     var ArchiveOutputStream = require_archive_output_stream();
     var ZipArchiveEntry = require_zip_archive_entry();
     var GeneralPurposeBit = require_general_purpose_bit();
-    var constants5 = require_constants6();
+    var constants4 = require_constants6();
     var util3 = require_util12();
     var zipUtil = require_util11();
     var ZipArchiveOutputStream = module2.exports = function(options) {
@@ -46861,21 +46861,21 @@ var require_zip_archive_output_stream = __commonJS({
     };
     ZipArchiveOutputStream.prototype._appendBuffer = function(ae, source, callback) {
       if (source.length === 0) {
-        ae.setMethod(constants5.METHOD_STORED);
+        ae.setMethod(constants4.METHOD_STORED);
       }
       var method = ae.getMethod();
-      if (method === constants5.METHOD_STORED) {
+      if (method === constants4.METHOD_STORED) {
         ae.setSize(source.length);
         ae.setCompressedSize(source.length);
         ae.setCrc(crc32.buf(source) >>> 0);
       }
       this._writeLocalFileHeader(ae);
-      if (method === constants5.METHOD_STORED) {
+      if (method === constants4.METHOD_STORED) {
         this.write(source);
         this._afterAppend(ae);
         callback(null, ae);
         return;
-      } else if (method === constants5.METHOD_DEFLATED) {
+      } else if (method === constants4.METHOD_DEFLATED) {
         this._smartStream(ae, callback).end(source);
         return;
       } else {
@@ -46885,7 +46885,7 @@ var require_zip_archive_output_stream = __commonJS({
     };
     ZipArchiveOutputStream.prototype._appendStream = function(ae, source, callback) {
       ae.getGeneralPurposeBit().useDataDescriptor(true);
-      ae.setVersionNeededToExtract(constants5.MIN_VERSION_DATA_DESCRIPTOR);
+      ae.setVersionNeededToExtract(constants4.MIN_VERSION_DATA_DESCRIPTOR);
       this._writeLocalFileHeader(ae);
       var smart = this._smartStream(ae, callback);
       source.once("error", function(err) {
@@ -46902,7 +46902,7 @@ var require_zip_archive_output_stream = __commonJS({
         o.zlib = {};
       }
       if (typeof o.zlib.level !== "number") {
-        o.zlib.level = constants5.ZLIB_BEST_SPEED;
+        o.zlib.level = constants4.ZLIB_BEST_SPEED;
       }
       o.forceZip64 = !!o.forceZip64;
       o.forceLocalTime = !!o.forceLocalTime;
@@ -46925,11 +46925,11 @@ var require_zip_archive_output_stream = __commonJS({
     };
     ZipArchiveOutputStream.prototype._normalizeEntry = function(ae) {
       if (ae.getMethod() === -1) {
-        ae.setMethod(constants5.METHOD_DEFLATED);
+        ae.setMethod(constants4.METHOD_DEFLATED);
       }
-      if (ae.getMethod() === constants5.METHOD_DEFLATED) {
+      if (ae.getMethod() === constants4.METHOD_DEFLATED) {
         ae.getGeneralPurposeBit().useDataDescriptor(true);
-        ae.setVersionNeededToExtract(constants5.MIN_VERSION_DATA_DESCRIPTOR);
+        ae.setVersionNeededToExtract(constants4.MIN_VERSION_DATA_DESCRIPTOR);
       }
       if (ae.getTime() === -1) {
         ae.setTime(/* @__PURE__ */ new Date(), this._archive.forceLocalTime);
@@ -46941,7 +46941,7 @@ var require_zip_archive_output_stream = __commonJS({
       };
     };
     ZipArchiveOutputStream.prototype._smartStream = function(ae, callback) {
-      var deflate = ae.getMethod() === constants5.METHOD_DEFLATED;
+      var deflate = ae.getMethod() === constants4.METHOD_DEFLATED;
       var process5 = deflate ? new DeflateCRC32Stream(this.options.zlib) : new CRC32Stream();
       var error2 = null;
       function handleStuff() {
@@ -46964,13 +46964,13 @@ var require_zip_archive_output_stream = __commonJS({
       var size = this._archive.centralLength;
       var offset = this._archive.centralOffset;
       if (this.isZip64()) {
-        records = constants5.ZIP64_MAGIC_SHORT;
-        size = constants5.ZIP64_MAGIC;
-        offset = constants5.ZIP64_MAGIC;
+        records = constants4.ZIP64_MAGIC_SHORT;
+        size = constants4.ZIP64_MAGIC;
+        offset = constants4.ZIP64_MAGIC;
       }
-      this.write(zipUtil.getLongBytes(constants5.SIG_EOCD));
-      this.write(constants5.SHORT_ZERO);
-      this.write(constants5.SHORT_ZERO);
+      this.write(zipUtil.getLongBytes(constants4.SIG_EOCD));
+      this.write(constants4.SHORT_ZERO);
+      this.write(constants4.SHORT_ZERO);
       this.write(zipUtil.getShortBytes(records));
       this.write(zipUtil.getShortBytes(records));
       this.write(zipUtil.getLongBytes(size));
@@ -46981,18 +46981,18 @@ var require_zip_archive_output_stream = __commonJS({
       this.write(comment);
     };
     ZipArchiveOutputStream.prototype._writeCentralDirectoryZip64 = function() {
-      this.write(zipUtil.getLongBytes(constants5.SIG_ZIP64_EOCD));
+      this.write(zipUtil.getLongBytes(constants4.SIG_ZIP64_EOCD));
       this.write(zipUtil.getEightBytes(44));
-      this.write(zipUtil.getShortBytes(constants5.MIN_VERSION_ZIP64));
-      this.write(zipUtil.getShortBytes(constants5.MIN_VERSION_ZIP64));
-      this.write(constants5.LONG_ZERO);
-      this.write(constants5.LONG_ZERO);
+      this.write(zipUtil.getShortBytes(constants4.MIN_VERSION_ZIP64));
+      this.write(zipUtil.getShortBytes(constants4.MIN_VERSION_ZIP64));
+      this.write(constants4.LONG_ZERO);
+      this.write(constants4.LONG_ZERO);
       this.write(zipUtil.getEightBytes(this._entries.length));
       this.write(zipUtil.getEightBytes(this._entries.length));
       this.write(zipUtil.getEightBytes(this._archive.centralLength));
       this.write(zipUtil.getEightBytes(this._archive.centralOffset));
-      this.write(zipUtil.getLongBytes(constants5.SIG_ZIP64_EOCD_LOC));
-      this.write(constants5.LONG_ZERO);
+      this.write(zipUtil.getLongBytes(constants4.SIG_ZIP64_EOCD_LOC));
+      this.write(constants4.LONG_ZERO);
       this.write(zipUtil.getEightBytes(this._archive.centralOffset + this._archive.centralLength));
       this.write(zipUtil.getLongBytes(1));
     };
@@ -47002,13 +47002,13 @@ var require_zip_archive_output_stream = __commonJS({
       var fileOffset = ae._offsets.file;
       var size = ae.getSize();
       var compressedSize = ae.getCompressedSize();
-      if (ae.isZip64() || fileOffset > constants5.ZIP64_MAGIC) {
-        size = constants5.ZIP64_MAGIC;
-        compressedSize = constants5.ZIP64_MAGIC;
-        fileOffset = constants5.ZIP64_MAGIC;
-        ae.setVersionNeededToExtract(constants5.MIN_VERSION_ZIP64);
+      if (ae.isZip64() || fileOffset > constants4.ZIP64_MAGIC) {
+        size = constants4.ZIP64_MAGIC;
+        compressedSize = constants4.ZIP64_MAGIC;
+        fileOffset = constants4.ZIP64_MAGIC;
+        ae.setVersionNeededToExtract(constants4.MIN_VERSION_ZIP64);
         var extraBuf = Buffer.concat([
-          zipUtil.getShortBytes(constants5.ZIP64_EXTRA_ID),
+          zipUtil.getShortBytes(constants4.ZIP64_EXTRA_ID),
           zipUtil.getShortBytes(24),
           zipUtil.getEightBytes(ae.getSize()),
           zipUtil.getEightBytes(ae.getCompressedSize()),
@@ -47016,8 +47016,8 @@ var require_zip_archive_output_stream = __commonJS({
         ], 28);
         ae.setExtra(extraBuf);
       }
-      this.write(zipUtil.getLongBytes(constants5.SIG_CFH));
-      this.write(zipUtil.getShortBytes(ae.getPlatform() << 8 | constants5.VERSION_MADEBY));
+      this.write(zipUtil.getLongBytes(constants4.SIG_CFH));
+      this.write(zipUtil.getShortBytes(ae.getPlatform() << 8 | constants4.VERSION_MADEBY));
       this.write(zipUtil.getShortBytes(ae.getVersionNeededToExtract()));
       this.write(gpb.encode());
       this.write(zipUtil.getShortBytes(method));
@@ -47035,7 +47035,7 @@ var require_zip_archive_output_stream = __commonJS({
       this.write(zipUtil.getShortBytes(name.length));
       this.write(zipUtil.getShortBytes(extra.length));
       this.write(zipUtil.getShortBytes(comment.length));
-      this.write(constants5.SHORT_ZERO);
+      this.write(constants4.SHORT_ZERO);
       this.write(zipUtil.getShortBytes(ae.getInternalAttributes()));
       this.write(zipUtil.getLongBytes(ae.getExternalAttributes()));
       this.write(zipUtil.getLongBytes(fileOffset));
@@ -47044,7 +47044,7 @@ var require_zip_archive_output_stream = __commonJS({
       this.write(comment);
     };
     ZipArchiveOutputStream.prototype._writeDataDescriptor = function(ae) {
-      this.write(zipUtil.getLongBytes(constants5.SIG_DD));
+      this.write(zipUtil.getLongBytes(constants4.SIG_DD));
       this.write(zipUtil.getLongBytes(ae.getCrc()));
       if (ae.isZip64()) {
         this.write(zipUtil.getEightBytes(ae.getCompressedSize()));
@@ -47061,22 +47061,22 @@ var require_zip_archive_output_stream = __commonJS({
       var extra = ae.getLocalFileDataExtra();
       if (ae.isZip64()) {
         gpb.useDataDescriptor(true);
-        ae.setVersionNeededToExtract(constants5.MIN_VERSION_ZIP64);
+        ae.setVersionNeededToExtract(constants4.MIN_VERSION_ZIP64);
       }
       if (gpb.usesUTF8ForNames()) {
         name = Buffer.from(name);
       }
       ae._offsets.file = this.offset;
-      this.write(zipUtil.getLongBytes(constants5.SIG_LFH));
+      this.write(zipUtil.getLongBytes(constants4.SIG_LFH));
       this.write(zipUtil.getShortBytes(ae.getVersionNeededToExtract()));
       this.write(gpb.encode());
       this.write(zipUtil.getShortBytes(method));
       this.write(zipUtil.getLongBytes(ae.getTimeDos()));
       ae._offsets.data = this.offset;
       if (gpb.usesDataDescriptor()) {
-        this.write(constants5.LONG_ZERO);
-        this.write(constants5.LONG_ZERO);
-        this.write(constants5.LONG_ZERO);
+        this.write(constants4.LONG_ZERO);
+        this.write(constants4.LONG_ZERO);
+        this.write(constants4.LONG_ZERO);
       } else {
         this.write(zipUtil.getLongBytes(ae.getCrc()));
         this.write(zipUtil.getLongBytes(ae.getCompressedSize()));
@@ -47092,7 +47092,7 @@ var require_zip_archive_output_stream = __commonJS({
       return this._archive.comment !== null ? this._archive.comment : "";
     };
     ZipArchiveOutputStream.prototype.isZip64 = function() {
-      return this._archive.forceZip64 || this._entries.length > constants5.ZIP64_MAGIC_SHORT || this._archive.centralLength > constants5.ZIP64_MAGIC || this._archive.centralOffset > constants5.ZIP64_MAGIC;
+      return this._archive.forceZip64 || this._entries.length > constants4.ZIP64_MAGIC_SHORT || this._archive.centralLength > constants4.ZIP64_MAGIC || this._archive.centralOffset > constants4.ZIP64_MAGIC;
     };
     ZipArchiveOutputStream.prototype.setComment = function(comment) {
       this._archive.comment = comment;
@@ -49418,7 +49418,7 @@ var require_extract = __commonJS({
 // node_modules/tar-stream/constants.js
 var require_constants7 = __commonJS({
   "node_modules/tar-stream/constants.js"(exports2, module2) {
-    var constants5 = {
+    var constants4 = {
       // just for envs without fs
       S_IFMT: 61440,
       S_IFDIR: 16384,
@@ -49428,9 +49428,9 @@ var require_constants7 = __commonJS({
       S_IFLNK: 40960
     };
     try {
-      module2.exports = require("fs").constants || constants5;
+      module2.exports = require("fs").constants || constants4;
     } catch {
-      module2.exports = constants5;
+      module2.exports = constants4;
     }
   }
 });
@@ -49440,7 +49440,7 @@ var require_pack = __commonJS({
   "node_modules/tar-stream/pack.js"(exports2, module2) {
     var { Readable: Readable7, Writable, getStreamError } = require_streamx();
     var b4a = require_b4a();
-    var constants5 = require_constants7();
+    var constants4 = require_constants7();
     var headers = require_headers2();
     var DMODE = 493;
     var FMODE = 420;
@@ -49643,16 +49643,16 @@ var require_pack = __commonJS({
       return new Pack(opts);
     };
     function modeToType(mode) {
-      switch (mode & constants5.S_IFMT) {
-        case constants5.S_IFBLK:
+      switch (mode & constants4.S_IFMT) {
+        case constants4.S_IFBLK:
           return "block-device";
-        case constants5.S_IFCHR:
+        case constants4.S_IFCHR:
           return "character-device";
-        case constants5.S_IFDIR:
+        case constants4.S_IFDIR:
           return "directory";
-        case constants5.S_IFIFO:
+        case constants4.S_IFIFO:
           return "fifo";
-        case constants5.S_IFLNK:
+        case constants4.S_IFLNK:
           return "symlink";
       }
       return "file";
@@ -54127,7 +54127,7 @@ var require_light = __commonJS({
 });
 
 // src/entry.ts
-var import_node_path7 = require("node:path");
+var import_node_path6 = require("node:path");
 
 // node_modules/@actions/core/lib/command.js
 var os = __toESM(require("os"), 1);
@@ -55550,31 +55550,19 @@ function saveState(name, value) {
 
 // src/main.ts
 var import_promises8 = require("node:fs/promises");
-var import_node_path6 = require("node:path");
 
 // src/inputs.ts
 function parseInputs(read, workspace) {
-  const str = (name, fallback = "") => {
-    const value = read(name).trim() || fallback;
-    if (value.length > 8192 || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value))
-      throw new Error(`Invalid ${name}: contains control characters or is too long.`);
-    return value;
-  };
-  const single = (name, fallback = "") => {
-    const value = str(name, fallback);
-    if (/[\r\n]/.test(value)) throw new Error(`${name} must be a single value.`);
-    return value;
-  };
+  const str = (name, fallback = "") => read(name).trim() || fallback;
   const choice = (name, values, fallback) => {
-    const value = single(name, fallback);
+    const value = str(name, fallback);
     if (!values.includes(value)) throw new Error(`${name} must be one of: ${values.join(", ")}.`);
     return value;
   };
   const bool = (name, fallback) => choice(name, ["true", "false"], String(fallback)) === "true";
-  const num = (name, integer, min = 0, max = Number.MAX_SAFE_INTEGER) => {
-    const value = single(name);
+  const num = (name, integer, min = 0, max = Infinity) => {
+    const value = str(name);
     if (!value) return void 0;
-    if (!/^\d+(?:\.\d+)?$/.test(value)) throw new Error(`${name} must be a finite ${integer ? "integer" : "number"}.`);
     const n = Number(value);
     if (!Number.isFinite(n) || integer && !Number.isSafeInteger(n) || n < min || n > max)
       throw new Error(`${name} must be ${integer ? "an integer" : "a number"} between ${min} and ${max}.`);
@@ -55582,7 +55570,7 @@ function parseInputs(read, workspace) {
   };
   const list = (name) => str(name).split(/\r?\n/).map((v) => v.trim()).filter(Boolean);
   const safeRelative = (name, value) => {
-    if (value.startsWith("-") || value.startsWith("/") || /^[A-Za-z]:/.test(value) || value.includes("\\") || value.split("/").includes("..") || /[\x00-\x1f\x7f]/.test(value))
+    if (value.startsWith("/") || /^[A-Za-z]:/.test(value) || value.includes("\\") || value.split("/").includes("..") || /[\x00-\x1f\x7f]/.test(value))
       throw new Error(`${name} must contain literal repository-relative paths, without '..'.`);
     return value;
   };
@@ -55590,24 +55578,20 @@ function parseInputs(read, workspace) {
   const scope = choice("scope", ["repository", "diff"], "repository");
   if (scope !== "repository" && paths.length)
     throw new Error(`paths cannot be combined with scope: ${scope}. Remove paths to scan changes, or use scope: repository to scan selected paths.`);
-  const diffBase = single("diff-base") || void 0;
+  const diffBase = str("diff-base") || void 0;
   if (diffBase && scope !== "diff") throw new Error("diff-base requires scope: diff.");
   const mode = choice("mode", ["standard", "deep"], "standard");
   if (mode === "deep" && scope !== "repository") throw new Error("mode: deep requires scope: repository.");
   const maxTimeHours = num("max-time-hours", false, Number.MIN_VALUE, 96);
   if (maxTimeHours !== void 0 && mode !== "deep") throw new Error("max-time-hours requires mode: deep.");
   const dryRun = bool("dry-run", false);
-  const artifactName = single("artifact-name", "codex-security");
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(artifactName)) throw new Error("artifact-name must be 1\u2013128 letters, numbers, dots, underscores, or hyphens.");
-  const model = single("model", "gpt-5.6-sol");
-  if (model.startsWith("-")) throw new Error("model must be a model name, not a CLI option.");
   return {
-    repository: single("repository", workspace),
+    repository: str("repository", workspace),
     scope,
     paths,
     diffBase,
     mode,
-    model,
+    model: str("model", "gpt-5.6-sol"),
     effort: choice("effort", ["minimal", "low", "medium", "high", "xhigh", "max"], "xhigh"),
     maxCost: num("max-cost", false, Number.MIN_VALUE),
     maxTimeHours,
@@ -55617,7 +55601,7 @@ function parseInputs(read, workspace) {
     summary: bool("summary", true),
     annotations: bool("annotations", true),
     uploadArtifacts: bool("upload-artifacts", false),
-    artifactName,
+    artifactName: str("artifact-name", "codex-security"),
     retentionDays: num("retention-days", true, 1, 90) ?? 7
   };
 }
@@ -55631,8 +55615,7 @@ function scanArguments(inputs, target, resultsDirectory, python) {
     "openai",
     "--mode",
     inputs.mode,
-    "--model",
-    inputs.model,
+    `--model=${inputs.model}`,
     "--effort",
     inputs.effort,
     "--headless",
@@ -55668,16 +55651,10 @@ var import_node_path = require("node:path");
 var import_node_string_decoder = require("node:string_decoder");
 function safeLogLines(value) {
   const clean = value.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, "").replace(/[\u2028\u2029]/g, "\n").replace(/##\[/g, "##\\[");
-  return clean.split("\n").filter(Boolean).map((line) => `[codex-security] ${line.slice(0, 4096)}`);
+  return clean.split("\n").filter(Boolean).map((line) => `[codex-security] ${line}`);
 }
 async function runProcess(executable, args, options) {
   if (!(0, import_node_path.isAbsolute)(executable) || !(0, import_node_path.isAbsolute)(options.cwd)) throw new Error("Process executable and working directory must be absolute paths.");
-  const limit = options.maxOutputBytes ?? 1024 * 1024;
-  const stdoutLimit = options.maxStdoutBytes ?? limit;
-  const timeout = options.timeoutMs ?? 60 * 60 * 1e3;
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 16 * 1024 * 1024) throw new Error("Invalid process output limit.");
-  if (stdoutLimit !== Infinity && (!Number.isSafeInteger(stdoutLimit) || stdoutLimit < 1)) throw new Error("Invalid stdout limit.");
-  if (!Number.isSafeInteger(timeout) || timeout < 1) throw new Error("Invalid process timeout.");
   options.signal?.throwIfAborted();
   return new Promise((resolve6, reject) => {
     const child = (0, import_node_child_process.spawn)(executable, [...args], {
@@ -55688,17 +55665,23 @@ async function runProcess(executable, args, options) {
       stdio: ["ignore", "pipe", "pipe"]
     });
     const buffers = { stdout: [], stderr: [] };
-    const sizes = { stdout: 0, stderr: 0 };
-    let truncated = false;
     let timedOut = false;
     let interrupted = false;
     const stderrDecoder = new import_node_string_decoder.StringDecoder("utf8");
     let pendingStderr = "";
+    const log2 = (value) => {
+      for (const line of safeLogLines(value)) {
+        try {
+          options.log?.(line);
+        } catch {
+        }
+      }
+    };
     const logStderr = (text) => {
       pendingStderr += text;
       const boundary = pendingStderr.lastIndexOf("\n");
       if (boundary < 0) return;
-      for (const line of safeLogLines(pendingStderr.slice(0, boundary + 1))) options.log?.(line);
+      log2(pendingStderr.slice(0, boundary + 1));
       pendingStderr = pendingStderr.slice(boundary + 1);
     };
     let killTimer;
@@ -55719,11 +55702,11 @@ async function runProcess(executable, args, options) {
       killTimer = setTimeout(() => kill("SIGKILL"), 2e3);
       killTimer.unref();
     };
-    const timer = setTimeout(() => {
+    const timer = options.timeoutMs === void 0 ? void 0 : setTimeout(() => {
       timedOut = true;
       stop();
-    }, timeout);
-    timer.unref();
+    }, options.timeoutMs);
+    timer?.unref();
     const interrupt = () => {
       interrupted = true;
       stop();
@@ -55732,17 +55715,8 @@ async function runProcess(executable, args, options) {
     process.once("SIGTERM", interrupt);
     options.signal?.addEventListener("abort", interrupt, { once: true });
     for (const name of ["stdout", "stderr"]) child[name].on("data", (chunk) => {
-      const remaining = (name === "stdout" ? stdoutLimit : limit) - sizes[name];
-      if (remaining > 0) {
-        const captured = chunk.subarray(0, remaining);
-        buffers[name].push(captured);
-        sizes[name] += captured.length;
-        if (name === "stderr" && options.log) logStderr(stderrDecoder.write(captured));
-      }
-      if (chunk.length > remaining) {
-        if (!truncated) options.log?.("[codex-security] Child output reached the capture limit; additional output is omitted.");
-        truncated = true;
-      }
+      buffers[name].push(chunk);
+      if (name === "stderr" && options.log) logStderr(stderrDecoder.write(chunk));
     });
     const finish = () => {
       clearTimeout(timer);
@@ -55761,9 +55735,9 @@ async function runProcess(executable, args, options) {
       const stdout = Buffer.concat(buffers.stdout).toString("utf8");
       const stderr = Buffer.concat(buffers.stderr).toString("utf8");
       if (options.log) {
-        for (const line of safeLogLines(pendingStderr + stderrDecoder.end())) options.log(line);
+        log2(pendingStderr + stderrDecoder.end());
       }
-      resolve6({ exitCode: code ?? 1, signal, stdout, stderr, truncated, timedOut, interrupted });
+      resolve6({ exitCode: code ?? 1, signal, stdout, stderr, timedOut, interrupted });
     });
   });
 }
@@ -55807,20 +55781,16 @@ async function gitResult(repository, args, acceptedExitCodes = [0]) {
     "-c",
     "core.askPass=/bin/false",
     ...args
-  ], { cwd: repository, env: gitEnvironment(), timeoutMs: 3e4, maxOutputBytes: 4 * 1024 * 1024 });
-  if (!acceptedExitCodes.includes(result.exitCode) || result.truncated || result.timedOut || result.interrupted || result.signal)
+  ], { cwd: repository, env: gitEnvironment(), timeoutMs: 3e4 });
+  if (!acceptedExitCodes.includes(result.exitCode) || result.timedOut || result.interrupted || result.signal)
     throw new Error(`Git ${args[0]} failed. Check the checkout and fetch-depth: 0 for PR/diff scans. ${safeLogLines(result.stderr || result.stdout).join("\n")}`);
   return result;
 }
 async function git(repository, args) {
   return (await gitResult(repository, args)).stdout;
 }
-function refValue(value) {
-  if (!value || value.length > 1024 || value.startsWith("-") || /[\x00-\x20\x7f]/.test(value)) throw new Error("Git revision must be a commit or ref, not an option or expression containing whitespace.");
-  return value;
-}
 async function commit(repository, value) {
-  const sha = (await git(repository, ["rev-parse", "--verify", "--end-of-options", `${refValue(value)}^{commit}`])).trim();
+  const sha = (await git(repository, ["rev-parse", "--verify", "--end-of-options", `${value}^{commit}`])).trim();
   if (!SHA.test(sha)) throw new Error("Git revision did not resolve to a commit ID.");
   return sha;
 }
@@ -55881,7 +55851,6 @@ async function resolveTarget(inputs, event) {
 }
 
 // src/runtime.ts
-var import_node_fs = require("node:fs");
 var import_promises2 = require("node:fs/promises");
 var import_node_path3 = require("node:path");
 
@@ -55901,7 +55870,7 @@ var ROOT_PREFIX = "codex-security-runtime-";
 var REGISTRY = "https://registry.npmjs.org/";
 function runtimeEnvironment(paths, apiKey) {
   const env = {
-    PATH: `${(0, import_node_path3.join)(paths.root, "bin")}:/usr/bin:/bin`,
+    PATH: `${(0, import_node_path3.join)(paths.root, "bin")}:${paths.runnerPath ?? "/usr/bin:/bin"}`,
     HOME: paths.home,
     CODEX_HOME: paths.codexHome,
     CODEX_SECURITY_STATE_DIR: paths.stateDirectory,
@@ -55940,11 +55909,10 @@ function runtimeEnvironment(paths, apiKey) {
   }
   return env;
 }
-async function regularFile(path6, executable = false, runnerProvided = false) {
+async function regularFile(path6) {
   const target = await (0, import_promises2.realpath)(path6);
   const info2 = await (0, import_promises2.lstat)(target);
-  if (!info2.isFile() || !runnerProvided && (info2.mode & 18) !== 0) throw new Error("Runtime prerequisite must be a regular file without group/world write access.");
-  if (executable) await (0, import_promises2.access)(target, import_node_fs.constants.X_OK);
+  if (!info2.isFile()) throw new Error("Runtime prerequisite must be a regular file.");
   return target;
 }
 async function resolveTool(name) {
@@ -55963,14 +55931,14 @@ async function setupRuntime(options) {
   const actionRoot = await (0, import_promises2.realpath)(options.actionRoot);
   const npmCli = await resolveTool("npm");
   const pythonPath = await resolveTool("python3");
-  const nodePath = await regularFile(process.execPath, true, true);
+  const nodePath = process.execPath;
   const root = await (0, import_promises2.mkdtemp)((0, import_node_path3.join)(tempRoot, ROOT_PREFIX));
   await (0, import_promises2.chmod)(root, 448);
   await (0, import_promises2.writeFile)((0, import_node_path3.join)(root, MARKER), "codex-security-action-v1\n", { mode: 384, flag: "wx" });
   const home = (0, import_node_path3.join)(root, "home");
   const codexHome = (0, import_node_path3.join)(root, "codex-home");
   const stateDirectory = (0, import_node_path3.join)(root, "state");
-  const paths = { root, home, codexHome, stateDirectory, pythonPath };
+  const paths = { root, home, codexHome, stateDirectory, pythonPath, runnerPath: process.env.PATH ?? "/usr/bin:/bin" };
   try {
     for (const dir of [home, codexHome, stateDirectory, (0, import_node_path3.join)(root, "tmp"), (0, import_node_path3.join)(root, "bin"), (0, import_node_path3.join)(root, "install")]) await (0, import_promises2.mkdir)(dir, { mode: 448 });
     await (0, import_promises2.symlink)(nodePath, (0, import_node_path3.join)(root, "bin", "node"));
@@ -55994,8 +55962,6 @@ async function setupRuntime(options) {
       throw new Error(`Integrity-locked CLI installation failed (exit ${install.exitCode}${install.timedOut ? ", timed out" : ""}${install.interrupted ? ", interrupted" : ""}). Check the prefixed npm diagnostics, registry access, and runner prerequisites.`);
     }
     const cliPath = await regularFile((0, import_node_path3.join)(destination, "node_modules", "@openai", "codex-security", "bin", "codex-security.mjs"));
-    const binary = (0, import_node_path3.join)(destination, "node_modules", "@openai", "codex-linux-x64", "vendor", "x86_64-unknown-linux-musl", "bin", "codex");
-    await regularFile(binary, true);
     const resultsDirectory = await (0, import_promises2.mkdtemp)((0, import_node_path3.join)(tempRoot, "codex-security-reports-"));
     await (0, import_promises2.chmod)(resultsDirectory, 448);
     return { ...paths, nodePath, cliPath, resultsDirectory, env: (apiKey) => runtimeEnvironment(paths, apiKey) };
@@ -56016,12 +55982,12 @@ async function cleanupRuntime(root, tempRoot) {
   const child = (0, import_node_path3.relative)(base, canonical);
   if (!info2.isDirectory() || info2.isSymbolicLink() || (0, import_node_path3.dirname)(canonical) !== base || !child.startsWith(ROOT_PREFIX) || child.includes(import_node_path3.sep) || (0, import_node_path3.resolve)(root) !== canonical) throw new Error("Refusing to clean a path outside the owned runtime root.");
   const marker2 = (0, import_node_path3.join)(canonical, MARKER);
-  if (!(await (0, import_promises2.lstat)(marker2)).isFile() || (await (0, import_promises2.lstat)(marker2)).isSymbolicLink() || await (0, import_promises2.readFile)(marker2, "utf8") !== "codex-security-action-v1\n") throw new Error("Refusing to clean a directory without the ownership marker.");
+  if (!(await (0, import_promises2.lstat)(marker2)).isFile() || await (0, import_promises2.readFile)(marker2, "utf8") !== "codex-security-action-v1\n") throw new Error("Refusing to clean a directory without the ownership marker.");
   await (0, import_promises2.rm)(canonical, { recursive: true, force: false });
 }
 
 // src/results.ts
-var import_node_fs2 = require("node:fs");
+var import_node_fs = require("node:fs");
 var import_promises3 = require("node:fs/promises");
 var import_node_path4 = require("node:path");
 
@@ -56031,9 +55997,6 @@ function isRecord(value) {
 }
 function safeSourcePath(value) {
   return typeof value === "string" && value.length > 0 && !/[\\\x00-\x1f\x7f]/u.test(value) && !value.startsWith("/") && !/^[a-z][a-z0-9+.-]*:/iu.test(value) && value.split("/").every((part) => part !== "..");
-}
-function exportSarifArgs(scanDirectory, sourceRoot, outputPath) {
-  return ["export", scanDirectory, "--export-format", "sarif", "--source-root", sourceRoot, "--output", outputPath];
 }
 function assertSafeSarif(value) {
   const pending = [value];
@@ -56056,7 +56019,6 @@ function assertSafeSarif(value) {
 
 // src/results.ts
 var REPORT_FILES = /* @__PURE__ */ new Set(["scan-manifest.json", "findings.json", "coverage.json", "exports/results.sarif"]);
-var LEVELS = ["informational", "low", "medium", "high", "critical"];
 async function processReportFile(root, name, adapt) {
   if (!REPORT_FILES.has(name)) throw new Error("Unsupported report filename.");
   const absoluteRoot = (0, import_node_path4.resolve)(root);
@@ -56073,7 +56035,7 @@ async function processReportFile(root, name, adapt) {
   const path6 = (0, import_node_path4.join)(absoluteRoot, name);
   const before = await (0, import_promises3.lstat)(path6);
   if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) throw new Error("Report must be a regular file without links.");
-  const file = await (0, import_promises3.open)(path6, (adapt ? import_node_fs2.constants.O_RDWR : import_node_fs2.constants.O_RDONLY) | import_node_fs2.constants.O_NOFOLLOW | import_node_fs2.constants.O_NONBLOCK);
+  const file = await (0, import_promises3.open)(path6, (adapt ? import_node_fs.constants.O_RDWR : import_node_fs.constants.O_RDONLY) | import_node_fs.constants.O_NOFOLLOW | import_node_fs.constants.O_NONBLOCK);
   try {
     const opened = await file.stat();
     if (!opened.isFile() || opened.nlink !== 1 || opened.dev !== before.dev || opened.ino !== before.ino) throw new Error("Report changed while opening.");
@@ -56125,7 +56087,7 @@ async function analyzeResults(options) {
       result.errors.push(value.message);
       return result;
     }
-    if (!isRecord(value) || !isRecord(value.manifest) || !isRecord(value.manifest.scan) || !isRecord(value.manifest.scan.target) || !isRecord(value.findings) || !Array.isArray(value.findings.findings) || !isRecord(value.coverage) || !["complete", "partial", "unknown"].includes(String(value.coverage.completeness)))
+    if (!value?.manifest?.scan?.target || !Array.isArray(value?.findings?.findings) || !value?.coverage)
       throw new Error();
   } catch {
     result.errors.push("CLI did not return a usable JSON scan result. See the CLI diagnostics.");
@@ -56137,8 +56099,6 @@ async function analyzeResults(options) {
   }
   try {
     result.findings = value.findings.findings.map((finding) => {
-      if (!isRecord(finding) || typeof finding.title !== "string" || typeof finding.summary !== "string" || !isRecord(finding.severity) || !LEVELS.includes(finding.severity.level) || !Array.isArray(finding.locations))
-        throw new Error("CLI finding is missing fields needed for GitHub reporting.");
       const location = finding.locations[0];
       if (location && (!safeSourcePath(location.path) || !Number.isSafeInteger(location.startLine) || location.startLine < 1 || location.endLine !== void 0 && (!Number.isSafeInteger(location.endLine) || location.endLine < location.startLine)))
         throw new Error("CLI finding has an unsafe source location for GitHub annotations.");
@@ -56157,8 +56117,7 @@ async function analyzeResults(options) {
   }
   result.counts = { critical: 0, high: 0, medium: 0, low: 0, informational: 0 };
   for (const finding of result.findings) result.counts[finding.severity] += 1;
-  if (isRecord(value.cost) && typeof value.cost.estimatedUsd === "number" && Number.isFinite(value.cost.estimatedUsd) && value.cost.estimatedUsd >= 0)
-    result.estimatedCost = value.cost.estimatedUsd;
+  result.estimatedCost = value.cost?.estimatedUsd;
   result.paths = {
     resultsDirectory: options.resultsDirectory,
     manifestPath: (0, import_node_path4.join)(options.resultsDirectory, "scan-manifest.json"),
@@ -56166,7 +56125,7 @@ async function analyzeResults(options) {
     coveragePath: (0, import_node_path4.join)(options.resultsDirectory, "coverage.json"),
     sarifPath: ""
   };
-  const warnings = (Array.isArray(value.warnings) ? value.warnings : []).filter((warning2) => typeof warning2 === "string");
+  const warnings = value.warnings ?? [];
   if (options.executionFailed || value.manifest.scan.status !== "completed" || warnings.length > 0) {
     result.errors.push("CLI did not complete successfully. See the CLI diagnostics.");
   } else if (value.coverage.completeness === "partial" && (options.exitCode === 0 || options.exitCode === 2)) {
@@ -56182,9 +56141,9 @@ async function analyzeResults(options) {
   }
   result.errors.push(...warnings);
   const sarifPath = (0, import_node_path4.join)(options.resultsDirectory, "exports/results.sarif");
-  if (options.sarifExported || value.sarifPath != null) {
+  if (value.sarifPath != null) {
     try {
-      if (!options.sarifExported && value.sarifPath !== sarifPath) throw new Error("SARIF path is outside the expected report location.");
+      if (value.sarifPath !== sarifPath) throw new Error("SARIF path is outside the expected report location.");
       await prepareSarif(options.resultsDirectory);
       result.paths.sarifPath = sarifPath;
     } catch {
@@ -82096,7 +82055,7 @@ var metadata = {
     }
   }
 };
-var access3 = {
+var access2 = {
   parameterPath: ["options", "access"],
   mapper: {
     serializedName: "x-ms-blob-public-access",
@@ -84046,7 +84005,7 @@ var createOperationSpec = {
     requestId,
     accept1,
     metadata,
-    access3,
+    access2,
     defaultEncryptionScope,
     preventEncryptionScopeOverride
   ],
@@ -84193,7 +84152,7 @@ var setAccessPolicyOperationSpec = {
     accept,
     version2,
     requestId,
-    access3,
+    access2,
     leaseId,
     ifModifiedSince,
     ifUnmodifiedSince
@@ -90910,7 +90869,7 @@ var Batch = class {
 };
 
 // node_modules/@azure/storage-blob/dist/esm/utils/utils.js
-var import_node_fs3 = __toESM(require("node:fs"), 1);
+var import_node_fs2 = __toESM(require("node:fs"), 1);
 var import_node_util3 = __toESM(require("node:util"), 1);
 async function streamToBuffer(stream4, buffer2, offset, end, encoding) {
   let pos = 0;
@@ -90953,7 +90912,7 @@ async function streamToBuffer(stream4, buffer2, offset, end, encoding) {
 }
 async function readStreamToLocalFile(rs, file) {
   return new Promise((resolve6, reject) => {
-    const ws = import_node_fs3.default.createWriteStream(file);
+    const ws = import_node_fs2.default.createWriteStream(file);
     rs.on("error", (err) => {
       reject(err);
     });
@@ -90964,8 +90923,8 @@ async function readStreamToLocalFile(rs, file) {
     rs.pipe(ws);
   });
 }
-var fsStat = import_node_util3.default.promisify(import_node_fs3.default.stat);
-var fsCreateReadStream = import_node_fs3.default.createReadStream;
+var fsStat = import_node_util3.default.promisify(import_node_fs2.default.stat);
+var fsCreateReadStream = import_node_fs2.default.createReadStream;
 
 // node_modules/@azure/storage-blob/dist/esm/Clients.js
 var BlobClient = class _BlobClient extends StorageClient2 {
@@ -99197,8 +99156,6 @@ var OUTPUT_NAMES = [
 async function context5() {
   const path6 = process.env.GITHUB_EVENT_PATH;
   if (!path6) throw new Error("GITHUB_EVENT_PATH is required; run this action in GitHub Actions.");
-  const info2 = await (0, import_promises8.lstat)(path6);
-  if (!info2.isFile() || info2.isSymbolicLink() || info2.size > 10 * 1024 * 1024) throw new Error("GitHub event payload is not a bounded regular file.");
   const payload = JSON.parse(await (0, import_promises8.readFile)(path6, "utf8"));
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("Invalid GitHub event payload.");
   return {
@@ -99255,7 +99212,6 @@ async function runAction(actionRoot, overrides = {}) {
     const apiKey = process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY || "";
     inputs = parseInputs((name) => getInput(name), process.env.GITHUB_WORKSPACE ?? "");
     const event = await context5();
-    validateEvent(event);
     target = await resolveTarget(inputs, event);
     setOutput("scanned-sha", target.scannedSha);
     setOutput("analysis-ref", target.analysisRef);
@@ -99298,10 +99254,7 @@ async function runAction(actionRoot, overrides = {}) {
         execution = await deps.runProcess(runtime.nodePath, [runtime.cliPath, ...args], {
           cwd: target.repository,
           env: inputs.dryRun ? runtimeEnvironment(runtime) : runtime.env(apiKey),
-          timeoutMs: 6 * 60 * 60 * 1e3,
-          maxOutputBytes: 4 * 1024 * 1024,
-          maxStdoutBytes: Infinity,
-          // Stream bounded stderr with terminal controls escaped; structured stdout stays private.
+          // Stream stderr with terminal controls escaped; structured stdout is consumed below.
           log: inputs.verbose ? info : void 0
         });
       } finally {
@@ -99311,7 +99264,7 @@ async function runAction(actionRoot, overrides = {}) {
       setOutput("exit-code", String(execution.exitCode));
       const interrupted = execution.interrupted || execution.timedOut || !!execution.signal;
       if (inputs.dryRun) {
-        if (execution.exitCode !== 0 || interrupted) throw new Error(`CLI configuration validation failed. ${inputs.verbose ? "See the CLI diagnostics above." : "Set verbose: true for bounded diagnostics."}`);
+        if (execution.exitCode !== 0 || interrupted) throw new Error(`CLI configuration validation failed. ${inputs.verbose ? "See the CLI diagnostics above." : "Set verbose: true for diagnostics."}`);
         setOutput("scan-status", "skipped");
         setOutput("skip-reason", "dry-run");
         setOutput("report-status", "ready");
@@ -99320,42 +99273,30 @@ async function runAction(actionRoot, overrides = {}) {
         finalSummary = "Dry-run validated local CLI configuration without credentials. It did not verify authentication/model access, scan code, or evaluate findings. Use a separate configuration job, never the production required security check.";
         info(finalSummary);
       } else {
-        info("Checking the checkout and preparing CLI results for GitHub.");
+        info("Preparing CLI results for GitHub.");
         let checkoutError = "";
-        try {
-          await resolveTarget(inputs, event);
-        } catch {
-          checkoutError = "The source checkout changed during scanning. Results cannot establish a completed scan of the requested revision.";
+        if (inputs.scope === "diff") {
+          try {
+            await resolveTarget(inputs, event);
+          } catch {
+            checkoutError = "The source checkout changed during scanning. Results cannot establish a completed scan of the requested revision.";
+          }
         }
-        const resultOptions = {
+        const result = await analyzeResults({
           stdout: execution.stdout,
           resultsDirectory: runtime.resultsDirectory,
           exitCode: execution.exitCode,
           executionFailed: interrupted || !!checkoutError,
           publishable: target.publishable && !interrupted && !checkoutError
-        };
-        let result = await analyzeResults(resultOptions);
-        if (result.paths.jsonPath && !result.paths.sarifPath && !interrupted && !checkoutError) {
-          info("Producing a SARIF export from the validated scan.");
-          try {
-            const exported = await deps.runProcess(runtime.nodePath, [runtime.cliPath, ...exportSarifArgs(runtime.resultsDirectory, target.repository, (0, import_node_path6.join)(runtime.resultsDirectory, "exports/results.sarif")), "--python", runtime.pythonPath], {
-              cwd: target.repository,
-              env: runtimeEnvironment(runtime),
-              timeoutMs: 6e4,
-              log: inputs.verbose ? info : void 0
-            });
-            if (exported.exitCode === 0 && !exported.interrupted && !exported.timedOut && !exported.signal)
-              result = await analyzeResults({ ...resultOptions, sarifExported: true });
-          } catch {
-            log2("SARIF export could not run; retaining the scan result.");
-          }
-        }
+        });
         if (result.paths.jsonPath && !result.paths.sarifPath)
           warning("SARIF report is unavailable; scan results and other reports are still available.");
         if (checkoutError) result.errors.unshift(checkoutError);
         if (interrupted) result.errors.unshift("Scan was interrupted or exceeded its execution limit. Available findings are provisional.");
+        let reportsValidated = false;
         try {
           const reports = await collectReports(result);
+          reportsValidated = true;
           if (inputs.uploadArtifacts) {
             info("Uploading validated report artifacts.");
             await uploadReports(reports, inputs, tempRoot);
@@ -99364,13 +99305,13 @@ async function runAction(actionRoot, overrides = {}) {
           result.reportStatus = "failed";
           result.sarifUploadReady = false;
           result.errors.push(plain(error2 instanceof Error ? error2.message : "Report publication failed."));
-          result.paths = { resultsDirectory: "", manifestPath: "", jsonPath: "", coveragePath: "", sarifPath: "" };
+          if (!reportsValidated) result.paths = { resultsDirectory: "", manifestPath: "", jsonPath: "", coveragePath: "", sarifPath: "" };
         }
         outputs(result, target, execution.exitCode);
         info(`Scan: ${result.scanStatus}; findings policy: ${result.policyStatus}; report: ${result.reportStatus}; SARIF upload ready: ${result.sarifUploadReady}.`);
         info(`${result.scanStatus === "completed" ? "Findings" : "Provisional findings"}: ${result.counts ? Object.entries(result.counts).map(([level, count]) => `${level}: ${count}`).join(", ") : "unavailable"}.`);
         info(`Estimated cost: ${result.estimatedCost === void 0 ? "unavailable" : `$${result.estimatedCost.toFixed(4)}`}.`);
-        for (const error2 of result.errors.slice(0, 10)) log2(`Report diagnostic: ${error2}`);
+        for (const error2 of result.errors) log2(`Report diagnostic: ${error2}`);
         finalSummary = resultSummary(result, inputs, target);
         if (inputs.annotations) emitAnnotations(result);
         success = result.reportStatus !== "failed" && (result.scanStatus === "incomplete" || result.scanStatus === "completed" && result.policyStatus === "passed");
@@ -99380,7 +99321,7 @@ async function runAction(actionRoot, overrides = {}) {
       }
     }
   } catch (error2) {
-    const message = plain(error2 instanceof Error ? error2.message : "Unexpected action failure.", 2e3);
+    const message = plain(error2 instanceof Error ? error2.message : "Unexpected action failure.");
     finalSummary = `<pre>${message.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/@/g, "&#64;")}</pre>`;
     setOutput("sarif-upload-ready", "false");
     error(message);
@@ -99413,7 +99354,7 @@ ${finalSummary}`).write();
 }
 
 // src/entry.ts
-void runAction((0, import_node_path7.resolve)(__dirname, "..")).catch(() => {
+void runAction((0, import_node_path6.resolve)(__dirname, "..")).catch(() => {
   process.exitCode = 1;
 });
 /*! Bundled license information:

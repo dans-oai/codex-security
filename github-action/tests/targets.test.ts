@@ -91,7 +91,7 @@ test('wrong checkout, local changes, missing diff base and option revisions are 
   await assert.rejects(resolveTarget(f.inputs(),f.event(f.base)),/must check out/);
   await assert.rejects(resolveTarget(f.inputs({scope:'repository'}),f.event(f.base,'schedule')),/HEAD must match GITHUB_SHA/);
   await assert.rejects(resolveTarget(f.inputs(),f.event(head,'workflow_dispatch')),/diff-base is required/);
-  await assert.rejects(resolveTarget(f.inputs({scope:'diff','diff-base':'--help'}),f.event(head)),/Git revision/);
+  await assert.rejects(resolveTarget(f.inputs({scope:'diff','diff-base':'--help'}),f.event(head)),/Git rev-parse failed/);
   await writeFile(join(f.path,'src/app.ts'),'dirty');
   await assert.rejects(resolveTarget(f.inputs(),f.event(head)),/local changes/);
   await assert.rejects(resolveTarget(f.inputs({scope:'repository'}),f.event(head,'schedule')),/local changes/);

@@ -41,13 +41,14 @@ test('credential-shaped diagnostics and encodings survive control normalization'
   assert.ok(!output.includes('[REDACTED]'));
 });
 
-test('process capture is bounded and stderr workflow commands are inert', async () => {
+test('process output and long diagnostics are preserved while workflow commands stay inert', async () => {
   const logs: string[] = [];
-  const result = await runProcess(process.execPath, ['-e', 'process.stdout.write("a".repeat(20000));process.stderr.write("::error::TOKEN\\n")'], { cwd: tmpdir(), env: {}, maxOutputBytes: 128, log: (line) => logs.push(line) });
-  assert.equal(Buffer.byteLength(result.stdout), 128);
-  assert.equal(result.truncated, true);
+  const diagnostic = `::error::${'detail'.repeat(2000)}`;
+  const result = await runProcess(process.execPath, ['-e', 'process.stdout.write("a".repeat(20000));process.stderr.write(process.argv[1] + "\\n")', diagnostic], { cwd: tmpdir(), env: {}, log: (line) => logs.push(line) });
+  assert.equal(Buffer.byteLength(result.stdout), 20000);
+  assert.equal(result.stderr, `${diagnostic}\n`);
   assert.ok(logs.every((line) => line.startsWith('[codex-security] ')));
-  assert.ok(logs.some((line) => line.includes('TOKEN')));
+  assert.deepEqual(logs, [`[codex-security] ${diagnostic}`]);
 });
 
 test('stderr streams before exit with split diagnostic text and UTF-8 safely reassembled', async (t) => {
@@ -83,15 +84,17 @@ test('stderr streams before exit with split diagnostic text and UTF-8 safely rea
   assert.deepEqual(logs, ['[codex-security] ::warning::split-secret 🔎 ready', '[codex-security] final line without newline']);
 });
 
-test('capture truncation preserves the captured diagnostic prefix and logs its limit once', async () => {
-  const logs: string[] = [];
+test('optional diagnostic logging failures do not stop the child or lose captured output', async () => {
   const result = await runProcess(process.execPath, ['-e', `
-    process.stderr.write('ready\\nsecret-value');
-    setTimeout(() => process.stderr.write('more output'), 20);
-  `], {cwd: tmpdir(), env: {}, maxOutputBytes: 12, log: line => logs.push(line)});
-  assert.equal(result.truncated, true);
-  assert.equal(Buffer.byteLength(result.stderr), 12);
-  assert.deepEqual(logs, ['[codex-security] ready', '[codex-security] Child output reached the capture limit; additional output is omitted.', '[codex-security] secret']);
+    process.stderr.write('ready\\n');
+    setTimeout(() => {
+      process.stdout.write('completed result');
+      process.stderr.write('final diagnostic');
+    }, 20);
+  `], {cwd: tmpdir(), env: {}, log: () => { throw new Error('log destination unavailable'); }});
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stdout, 'completed result');
+  assert.equal(result.stderr, 'ready\nfinal diagnostic');
 });
 
 test('timeout terminates an owned process group', async () => {
@@ -120,14 +123,13 @@ test('AbortSignal stops a running child and paths must be absolute', async () =>
   await assert.rejects(runProcess('node', [], { cwd: tmpdir(), env: {} }), /absolute/);
 });
 
-test('full structured stdout stays readable while diagnostic capture remains bounded', async () => {
+test('full structured output and diagnostic capture remain readable beyond the former limit', async () => {
   const length = 4 * 1024 * 1024 + 1;
   const result = await runProcess(process.execPath, ['-e', `
     process.stdout.write(JSON.stringify({detail:'x'.repeat(${length})}));
-    process.stderr.write('diagnostic'.repeat(100));
-  `], {cwd: tmpdir(), env: {}, maxOutputBytes: 128, maxStdoutBytes: Infinity});
+    process.stderr.write('diagnostic'.repeat(500000));
+  `], {cwd: tmpdir(), env: {}});
   assert.equal(result.exitCode, 0);
   assert.equal(JSON.parse(result.stdout).detail.length, length);
-  assert.equal(Buffer.byteLength(result.stderr), 128);
-  assert.equal(result.truncated, true); // Only diagnostics were truncated.
+  assert.equal(result.stderr, 'diagnostic'.repeat(500000));
 });

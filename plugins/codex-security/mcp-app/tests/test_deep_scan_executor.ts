@@ -975,7 +975,10 @@ async function testOpenAiCredentialsReachWorker() {
       entry.accountResult ?? noAccount,
     );
     const runtimeEnvironment = {
-      PATH: path.dirname(process.execPath),
+      PATH: [
+        path.dirname(process.execPath),
+        path.join(fixture.root, "runner-tools"),
+      ].join(path.delimiter),
       HOME: path.join(fixture.root, "home"),
       PYTHON: path.join(fixture.root, "tools", "python3"),
       PYTHONUTF8: "1",

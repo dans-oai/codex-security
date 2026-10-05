@@ -19432,7 +19432,7 @@ async function cleanupRuntime(root2, tempRoot2) {
   const child = (0, import_node_path.relative)(base, canonical);
   if (!info.isDirectory() || info.isSymbolicLink() || (0, import_node_path.dirname)(canonical) !== base || !child.startsWith(ROOT_PREFIX) || child.includes(import_node_path.sep) || (0, import_node_path.resolve)(root2) !== canonical) throw new Error("Refusing to clean a path outside the owned runtime root.");
   const marker = (0, import_node_path.join)(canonical, MARKER);
-  if (!(await (0, import_promises.lstat)(marker)).isFile() || (await (0, import_promises.lstat)(marker)).isSymbolicLink() || await (0, import_promises.readFile)(marker, "utf8") !== "codex-security-action-v1\n") throw new Error("Refusing to clean a directory without the ownership marker.");
+  if (!(await (0, import_promises.lstat)(marker)).isFile() || await (0, import_promises.readFile)(marker, "utf8") !== "codex-security-action-v1\n") throw new Error("Refusing to clean a directory without the ownership marker.");
   await (0, import_promises.rm)(canonical, { recursive: true, force: false });
 }
 

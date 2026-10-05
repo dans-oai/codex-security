@@ -79,6 +79,25 @@ test('scan environment excludes all inherited credential/config channels', () =>
   } finally { for (const key of Object.keys(poison)) { if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key]; } }
 });
 
+test('each scan retains its runner tool path while keeping its environment isolated', async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'runtime-path-')));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const tools = join(root, 'runner-tools');
+  await mkdir(tools);
+  const tool = join(tools, 'synthetic-tool');
+  await writeFile(tool, '#!/bin/sh\nprintf selected-runner-tool\n', { mode: 0o755 });
+  const paths = { root, home: root, codexHome: root, stateDirectory: root, pythonPath: '/usr/bin/python3', runnerPath: tools };
+  const first = runtimeEnvironment(paths, 'first-scan-key');
+  const second = runtimeEnvironment({...paths, runnerPath:'/other/tools'}, 'second-scan-key');
+  const { runProcess } = await import('../src/process.js');
+  const result = await runProcess('/bin/sh', ['-c', 'synthetic-tool'], {cwd:root, env:first});
+  assert.equal(result.stdout, 'selected-runner-tool');
+  assert.equal(first.PATH, `${join(root, 'bin')}:${tools}`);
+  assert.equal(second.PATH, `${join(root, 'bin')}:/other/tools`);
+  assert.equal(first.OPENAI_API_KEY, 'first-scan-key');
+  assert.equal(second.OPENAI_API_KEY, 'second-scan-key');
+});
+
 test('shipped runtime lock matches the manifest and records dependency integrity', async () => {
   const lock = JSON.parse(await readFile(new URL('../runtime/package-lock.json', import.meta.url), 'utf8'));
   const manifest = JSON.parse(await readFile(new URL('../runtime/package.json', import.meta.url), 'utf8'));

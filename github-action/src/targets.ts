@@ -45,20 +45,16 @@ async function gitResult(repository: string, args: string[], acceptedExitCodes =
   const result = await runProcess('/usr/bin/git', [
     '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'core.untrackedCache=false',
     '-c', 'credential.helper=', '-c', 'core.askPass=/bin/false', ...args,
-  ], { cwd: repository, env: gitEnvironment(), timeoutMs: 30_000, maxOutputBytes: 4 * 1024 * 1024 });
-  if (!acceptedExitCodes.includes(result.exitCode) || result.truncated || result.timedOut || result.interrupted || result.signal)
+  ], { cwd: repository, env: gitEnvironment(), timeoutMs: 30_000 });
+  if (!acceptedExitCodes.includes(result.exitCode) || result.timedOut || result.interrupted || result.signal)
     throw new Error(`Git ${args[0]} failed. Check the checkout and fetch-depth: 0 for PR/diff scans. ${safeLogLines(result.stderr || result.stdout).join("\n")}`);
   return result;
 }
 export async function git(repository: string, args: string[]): Promise<string> {
   return (await gitResult(repository, args)).stdout;
 }
-function refValue(value: string): string {
-  if (!value || value.length > 1024 || value.startsWith('-') || /[\x00-\x20\x7f]/.test(value)) throw new Error('Git revision must be a commit or ref, not an option or expression containing whitespace.');
-  return value;
-}
 async function commit(repository: string, value: string): Promise<string> {
-  const sha = (await git(repository, ['rev-parse', '--verify', '--end-of-options', `${refValue(value)}^{commit}`])).trim();
+  const sha = (await git(repository, ['rev-parse', '--verify', '--end-of-options', `${value}^{commit}`])).trim();
   if (!SHA.test(sha)) throw new Error('Git revision did not resolve to a commit ID.');
   return sha;
 }

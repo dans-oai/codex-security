@@ -9,11 +9,6 @@ export function safeSourcePath(value: unknown): value is string {
     value.split('/').every((part) => part !== '..');
 }
 
-export function exportSarifArgs(scanDirectory: string, sourceRoot: string, outputPath: string): string[] {
-  // Each item is an argv entry, not shell text. The caller supplies verified absolute paths.
-  return ['export', scanDirectory, '--export-format', 'sarif', '--source-root', sourceRoot, '--output', outputPath];
-}
-
 /** Keep source references safe for publication without duplicating the CLI's SARIF contract. */
 export function assertSafeSarif(value: unknown): void {
   const pending: unknown[] = [value];

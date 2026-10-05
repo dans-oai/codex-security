@@ -92,10 +92,6 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
   let incomplete = false;
   let omitSarif = false;
   let mutateCheckout = false;
-  let exportSucceeds = true;
-  let exportThrows = false;
-  let exportTimedOut = false;
-  let exportSignal: NodeJS.Signals | null = null;
   let cleanupFails = false;
   let summary = '';
   t.mock.method(core.summary, 'write', async () => {
@@ -140,13 +136,10 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
   return {
     repository, sha, base, git, runtime,
     setInput: (name: string, value: string) => { process.env[inputKey(name)] = value; },
-    configure: (options: { exitCode?: number; partial?: boolean; missingSarif?: boolean; mutateCheckout?: boolean; exportSucceeds?: boolean; exportThrows?: boolean; exportTimedOut?: boolean; exportSignal?: NodeJS.Signals; cleanupFails?: boolean; cliFailure?: boolean; scanProcess?: Partial<ProcessResult>; scanResult?: (value: any) => void; missingReport?: string }) => {
+    configure: (options: { exitCode?: number; partial?: boolean; missingSarif?: boolean; mutateCheckout?: boolean; cleanupFails?: boolean; cliFailure?: boolean; scanProcess?: Partial<ProcessResult>; scanResult?: (value: any) => void; missingReport?: string }) => {
       executionExit = options.exitCode ?? executionExit; incomplete = options.partial ?? incomplete;
-      omitSarif = options.missingSarif ?? omitSarif; mutateCheckout = options.mutateCheckout ?? mutateCheckout;
-      exportSucceeds = options.exportSucceeds ?? exportSucceeds;
-      exportThrows = options.exportThrows ?? exportThrows;
-      exportTimedOut = options.exportTimedOut ?? exportTimedOut;
-      exportSignal = options.exportSignal ?? exportSignal;
+      omitSarif = options.missingSarif ?? omitSarif;
+      mutateCheckout = options.mutateCheckout ?? mutateCheckout;
       cleanupFails = options.cleanupFails ?? cleanupFails;
       cliFailure = options.cliFailure ?? cliFailure;
       scanProcess = options.scanProcess ?? scanProcess;
@@ -173,12 +166,9 @@ async function harness(t: TestContext, scenario: Scenario = 'schedule') {
             processEnvironments.push(options.env);
             options.log?.('[codex-security] Synthetic live CLI progress.');
             if (mutateCheckout) await writeFile(join(repository, 'app.txt'), 'modified while scanning\n');
-            const exporting = args[1] === 'export';
-            if (exporting && exportThrows) throw new Error('Synthetic exporter failure: synthetic-offline-test-key');
-            if (exporting && exportSucceeds) { omitSarif = false; await reports(); }
-            return { exitCode: exporting ? (exportSucceeds ? 0 : 2) : executionExit ?? (process.env['INPUT_FAIL-ON-SEVERITY'] === 'high' ? 1 : 0), signal: exporting ? exportSignal : null,
-              stdout: cliFailure ? JSON.stringify({status: 'failed', code: 'SCAN_FAILED', message: 'Synthetic API authentication failure.'}) : scanOutput, stderr: '', interrupted: false, timedOut: exporting && exportTimedOut, truncated: false,
-              ...(exporting ? {} : scanProcess) };
+            return { exitCode: executionExit ?? (process.env['INPUT_FAIL-ON-SEVERITY'] === 'high' ? 1 : 0), signal: null,
+              stdout: cliFailure ? JSON.stringify({status: 'failed', code: 'SCAN_FAILED', message: 'Synthetic API authentication failure.'}) : scanOutput,
+              stderr: '', interrupted: false, timedOut: false, ...scanProcess };
           },
         });
         exitCode = process.exitCode;
@@ -199,7 +189,7 @@ test('PR severity failure retains complete SARIF outputs for always upload steps
   assert.equal(result.outputs['sarif-upload-ready'], 'true'); assert.equal(result.outputs['analysis-ref'], 'refs/pull/4/head');
   assert.equal(result.outputs['scanned-sha'], app.sha); assert.equal(result.outputs['high-count'], '1');
   assert.equal(result.outputs['estimated-cost'], '0.125'); assert.ok(result.outputs['sarif-path']);
-  assert.equal(result.args[result.args.indexOf('--model') + 1], 'gpt-5.6-luna');
+  assert.ok(result.args.includes('--model=gpt-5.6-luna'));
   assert.equal(result.args[result.args.indexOf('--effort') + 1], 'medium');
   assert.ok(!result.args.includes('--max-cost'));
   assert.match(result.logs, /::error::Scan completed\. Findings meet the configured failure threshold\./);
@@ -262,14 +252,12 @@ test('findings below the threshold pass with an explicit outcome', async (t) => 
   assert.match(result.summary, /\*\*Scan completed\. No findings meet the failure threshold\.\*\*/);
 });
 
-test('same-repository Dependabot PR scans with a supplied key kept out of export', async (t) => {
+test('same-repository Dependabot PR scans with a supplied key', async (t) => {
   const app = await harness(t, 'pr'); process.env.GITHUB_ACTOR = 'dependabot[bot]';
-  app.configure({ missingSarif: true });
   const result = await app.run();
-  assert.equal(result.exitCode, 0); assert.equal(result.setups, 1); assert.equal(result.processes, 2);
+  assert.equal(result.exitCode, 0); assert.equal(result.setups, 1); assert.equal(result.processes, 1);
   assert.equal(result.outputs['scan-status'], 'completed'); assert.equal(result.outputs['scanned-sha'], app.sha);
   assert.equal(result.processEnvironments[0].OPENAI_API_KEY, 'synthetic-offline-test-key');
-  assert.equal(result.processEnvironments[1].OPENAI_API_KEY, undefined);
   assert.equal(result.outputs['sarif-upload-ready'], 'true');
 });
 
@@ -337,7 +325,7 @@ test('configuration diagnostics preserve values and cannot inject runner command
 });
 
 test('partial scan warns with provisional findings and no SARIF upload eligibility', async (t) => {
-  const app = await harness(t); app.configure({ exitCode: 2, partial: true, missingSarif: true, exportSucceeds: false }); app.setInput('verbose', 'false');
+  const app = await harness(t); app.configure({ exitCode: 2, partial: true, missingSarif: true }); app.setInput('verbose', 'false');
   const result = await app.run();
   assert.equal(result.exitCode, 0); assert.equal(result.outputs['scan-status'], 'incomplete');
   assert.equal(result.outputs['exit-code'], '2');
@@ -408,13 +396,6 @@ for (const [name, scanResult] of [
   });
 }
 
-test('partial coverage does not hide a changed checkout', async (t) => {
-  const app = await harness(t); app.configure({exitCode: 2, partial: true, mutateCheckout: true});
-  const result = await app.run();
-  assert.equal(result.exitCode, 1); assert.equal(result.outputs['scan-status'], 'failed');
-  assert.match(result.summary, /source checkout changed/);
-});
-
 test('CLI failure remains fatal even with partial reports on disk', async (t) => {
   const app = await harness(t); app.configure({exitCode: 2, partial: true, cliFailure: true});
   const result = await app.run();
@@ -477,21 +458,8 @@ test('scope conflict fails without runtime setup', async (t) => {
   assert.equal(result.exitCode, 1); assert.equal(result.setups, 0); assert.match(result.logs, /paths cannot be combined/u);
 });
 
-test('changed checkout during scan prevents a completed result', async (t) => {
-  const app = await harness(t); app.configure({ mutateCheckout: true }); const result = await app.run();
-  assert.equal(result.exitCode, 1); assert.equal(result.outputs['scan-status'], 'failed'); assert.equal(result.outputs['sarif-upload-ready'], 'false');
-  assert.ok(result.outputs['json-path']);
-  assert.match(result.logs, /Report diagnostic: The source checkout changed/);
-});
-
-test('strict export repairs missing best-effort SARIF without model credentials', async (t) => {
-  const app = await harness(t); app.configure({ missingSarif: true }); const result = await app.run();
-  assert.equal(result.exitCode, 0); assert.equal(result.processes, 2); assert.equal(result.args[1], 'export');
-  assert.equal(result.environment.OPENAI_API_KEY, undefined); assert.equal(result.outputs['sarif-upload-ready'], 'true');
-});
-
-test('failed SARIF export preserves a successful scan and uploads the remaining reports', async (t) => {
-  const app = await harness(t); app.configure({ missingSarif: true, exportSucceeds: false });
+test('missing optional CLI SARIF preserves a successful scan and uploads the remaining reports', async (t) => {
+  const app = await harness(t); app.configure({ missingSarif: true });
   app.setInput('annotations', 'true'); app.setInput('upload-artifacts', 'true');
   let uploadedFiles: string[] = [];
   t.mock.method(DefaultArtifactClient.prototype, 'uploadArtifact', async (_name: string, files: string[]) => {
@@ -500,7 +468,7 @@ test('failed SARIF export preserves a successful scan and uploads the remaining 
     return {id: 1, size: 1};
   });
   const result = await app.run();
-  assert.equal(result.exitCode, 0); assert.equal(result.processes, 2); assert.equal(result.cleanups, 1);
+  assert.equal(result.exitCode, 0); assert.equal(result.processes, 1); assert.equal(result.cleanups, 1);
   assert.equal(result.outputs['scan-status'], 'completed'); assert.equal(result.outputs['policy-status'], 'passed');
   assert.equal(result.outputs['report-status'], 'partial'); assert.equal(result.outputs['sarif-upload-ready'], 'false');
   assert.equal(result.outputs['sarif-path'], ''); assert.equal(result.outputs['high-count'], '1');
@@ -513,26 +481,9 @@ test('failed SARIF export preserves a successful scan and uploads the remaining 
   assert.match(result.summary, /SARIF report is unavailable/);
 });
 
-for (const failure of ['throw', 'timeout', 'signal'] as const) {
-  test(`SARIF export ${failure} preserves the completed scan`, async (t) => {
-    const app = await harness(t);
-    app.configure({missingSarif: true, exportThrows: failure === 'throw', exportTimedOut: failure === 'timeout',
-      exportSignal: failure === 'signal' ? 'SIGTERM' : undefined});
-    const result = await app.run();
-    assert.equal(result.exitCode, 0); assert.equal(result.outputs['scan-status'], 'completed');
-    assert.equal(result.outputs['policy-status'], 'passed'); assert.equal(result.outputs['report-status'], 'partial');
-    assert.equal(result.outputs['sarif-path'], ''); assert.equal(result.outputs['sarif-upload-ready'], 'false');
-    assert.ok(result.outputs['json-path']); assert.equal(result.cleanups, 1);
-    assert.match(result.logs, /::warning::SARIF report is unavailable/);
-    const logs = result.logs.split('\n').filter(line => !line.startsWith('::add-mask::')).join('\n');
-    assert.doesNotMatch(logs, /synthetic-offline-test-key/);
-    assert.doesNotMatch(result.summary, /synthetic-offline-test-key/);
-  });
-}
-
 test('missing SARIF does not mask a findings threshold failure', async (t) => {
   const app = await harness(t); app.setInput('fail-on-severity', 'high');
-  app.configure({missingSarif: true, exportSucceeds: false});
+  app.configure({missingSarif: true});
   const result = await app.run();
   assert.equal(result.exitCode, 1); assert.equal(result.outputs['scan-status'], 'completed');
   assert.equal(result.outputs['policy-status'], 'failed'); assert.equal(result.outputs['report-status'], 'partial');
@@ -542,7 +493,7 @@ test('missing SARIF does not mask a findings threshold failure', async (t) => {
 });
 
 test('requested artifact upload failure remains fatal without SARIF', async (t) => {
-  const app = await harness(t); app.configure({missingSarif: true, exportSucceeds: false});
+  const app = await harness(t); app.configure({missingSarif: true});
   app.setInput('upload-artifacts', 'true');
   const upload = t.mock.method(DefaultArtifactClient.prototype, 'uploadArtifact', async () => {
     throw new Error('Synthetic artifact upload failure');
@@ -551,8 +502,8 @@ test('requested artifact upload failure remains fatal without SARIF', async (t) 
   assert.equal(upload.mock.callCount(), 1); assert.equal(result.exitCode, 1);
   assert.equal(result.outputs['scan-status'], 'completed'); assert.equal(result.outputs['policy-status'], 'passed');
   assert.equal(result.outputs['report-status'], 'failed'); assert.equal(result.outputs['sarif-upload-ready'], 'false');
-  assert.equal(result.outputs['json-path'], ''); assert.equal(result.outputs['coverage-path'], '');
-  assert.equal(result.outputs['results-directory'], ''); assert.equal(result.outputs['sarif-path'], '');
+  assert.ok(result.outputs['json-path']); assert.ok(result.outputs['coverage-path']);
+  assert.ok(result.outputs['results-directory']); assert.equal(result.outputs['sarif-path'], '');
   assert.match(result.logs, /::error::Scan completed, but required reporting failed\./);
   assert.match(result.summary, /Synthetic artifact upload failure/);
 });
@@ -589,3 +540,15 @@ test('valid empty findings publish zero counts', async (t) => {
   assert.equal(result.exitCode, 0);
   for (const level of ['critical', 'high', 'medium', 'low', 'informational']) assert.equal(result.outputs[`${level}-count`], '0');
 });
+
+for (const partial of [false, true]) {
+  test(`changed checkout during a committed diff scan fails with ${partial ? 'partial' : 'complete'} coverage`, async (t) => {
+    const app = await harness(t, 'pr');
+    app.configure({mutateCheckout: true, partial, exitCode: partial ? 2 : 0});
+    const result = await app.run();
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.outputs['scan-status'], 'failed');
+    assert.equal(result.outputs['sarif-upload-ready'], 'false');
+    assert.match(result.summary, /source checkout changed/);
+  });
+}

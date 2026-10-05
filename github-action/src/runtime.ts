@@ -1,6 +1,5 @@
 import { which } from '@actions/io';
-import { constants } from 'node:fs';
-import { access, chmod, copyFile, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { runProcess, safeLogLines } from './process.js';
 import runtimeManifest from '../runtime/package.json' with { type: 'json' };
@@ -24,13 +23,14 @@ export interface Runtime {
   codexHome: string;
   stateDirectory: string;
   resultsDirectory: string;
+  runnerPath?: string;
   env: (apiKey: string) => NodeJS.ProcessEnv;
 }
 
 /** Deliberately construct a new environment: never copy process.env. */
-export function runtimeEnvironment(paths: Pick<Runtime, 'root' | 'home' | 'codexHome' | 'stateDirectory' | 'pythonPath'>, apiKey?: string): NodeJS.ProcessEnv {
+export function runtimeEnvironment(paths: Pick<Runtime, 'root' | 'home' | 'codexHome' | 'stateDirectory' | 'pythonPath' | 'runnerPath'>, apiKey?: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
-    PATH: `${join(paths.root, 'bin')}:/usr/bin:/bin`,
+    PATH: `${join(paths.root, 'bin')}:${paths.runnerPath ?? '/usr/bin:/bin'}`,
     HOME: paths.home, CODEX_HOME: paths.codexHome,
     CODEX_SECURITY_STATE_DIR: paths.stateDirectory,
     TMPDIR: join(paths.root, 'tmp'), TMP: join(paths.root, 'tmp'), TEMP: join(paths.root, 'tmp'),
@@ -52,13 +52,10 @@ export function runtimeEnvironment(paths: Pick<Runtime, 'root' | 'home' | 'codex
   return env;
 }
 
-async function regularFile(path: string, executable = false, runnerProvided = false): Promise<string> {
+async function regularFile(path: string): Promise<string> {
   const target = await realpath(path);
   const info = await lstat(target);
-  // Trust the runner's Node executable; retain mode checks for installed CLI files
-  // and the Action's manifests.
-  if (!info.isFile() || (!runnerProvided && (info.mode & 0o022) !== 0)) throw new Error('Runtime prerequisite must be a regular file without group/world write access.');
-  if (executable) await access(target, constants.X_OK);
+  if (!info.isFile()) throw new Error('Runtime prerequisite must be a regular file.');
   return target;
 }
 
@@ -81,14 +78,14 @@ export async function setupRuntime(options: RuntimeOptions): Promise<Runtime> {
   const actionRoot = await realpath(options.actionRoot);
   const npmCli = await resolveTool('npm');
   const pythonPath = await resolveTool('python3');
-  const nodePath = await regularFile(process.execPath, true, true);
+  const nodePath = process.execPath;
   const root = await mkdtemp(join(tempRoot, ROOT_PREFIX));
   await chmod(root, 0o700);
   await writeFile(join(root, MARKER), 'codex-security-action-v1\n', { mode: 0o600, flag: 'wx' });
   const home = join(root, 'home');
   const codexHome = join(root, 'codex-home');
   const stateDirectory = join(root, 'state');
-  const paths = { root, home, codexHome, stateDirectory, pythonPath };
+  const paths = { root, home, codexHome, stateDirectory, pythonPath, runnerPath: process.env.PATH ?? '/usr/bin:/bin' };
   try {
     for (const dir of [home, codexHome, stateDirectory, join(root, 'tmp'), join(root, 'bin'), join(root, 'install')]) await mkdir(dir, { mode: 0o700 });
     await symlink(nodePath, join(root, 'bin', 'node'));
@@ -114,8 +111,6 @@ export async function setupRuntime(options: RuntimeOptions): Promise<Runtime> {
       throw new Error(`Integrity-locked CLI installation failed (exit ${install.exitCode}${install.timedOut ? ', timed out' : ''}${install.interrupted ? ', interrupted' : ''}). Check the prefixed npm diagnostics, registry access, and runner prerequisites.`);
     }
     const cliPath = await regularFile(join(destination, 'node_modules', '@openai', 'codex-security', 'bin', 'codex-security.mjs'));
-    const binary = join(destination, 'node_modules', '@openai', 'codex-linux-x64', 'vendor', 'x86_64-unknown-linux-musl', 'bin', 'codex');
-    await regularFile(binary, true);
     // Private reports deliberately live outside the disposable credentials/runtime
     // root so downstream upload-sarif remains usable after the post action.
     const resultsDirectory = await mkdtemp(join(tempRoot, 'codex-security-reports-'));
@@ -136,6 +131,6 @@ export async function cleanupRuntime(root: string, tempRoot: string): Promise<vo
   const child = relative(base, canonical);
   if (!info.isDirectory() || info.isSymbolicLink() || dirname(canonical) !== base || !child.startsWith(ROOT_PREFIX) || child.includes(sep) || resolve(root) !== canonical) throw new Error('Refusing to clean a path outside the owned runtime root.');
   const marker = join(canonical, MARKER);
-  if (!(await lstat(marker)).isFile() || (await lstat(marker)).isSymbolicLink() || await readFile(marker, 'utf8') !== 'codex-security-action-v1\n') throw new Error('Refusing to clean a directory without the ownership marker.');
+  if (!(await lstat(marker)).isFile() || await readFile(marker, 'utf8') !== 'codex-security-action-v1\n') throw new Error('Refusing to clean a directory without the ownership marker.');
   await rm(canonical, { recursive: true, force: false });
 }

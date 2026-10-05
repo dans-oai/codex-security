@@ -7,7 +7,6 @@ import { dirname, join, resolve } from 'node:path';
 import { parseInputs, scanArguments } from '../src/inputs.js';
 import { analyzeResults } from '../src/results.js';
 import { resolveTool } from '../src/runtime.js';
-import { exportSarifArgs } from '../src/sarif.js';
 import runtimeManifest from '../runtime/package.json' with { type: 'json' };
 
 const cliPackage = resolve(import.meta.dirname, '../runtime/node_modules/@openai/codex-security');
@@ -49,9 +48,11 @@ try {
     const cliResult = JSON.parse(stdout);
     assert.equal(cliResult.turn.mock, true, 'The integration scan must remain synthetic');
     assert.ok(cliResult.findings.findings.length > 0);
-    // Use the same strict exporter invocation as the Action, including source-root handling.
-    run(exportSarifArgs(resultsDirectory, repository, join(resultsDirectory, 'exports/results.sarif')), 0);
-    const result = await analyzeResults({ stdout, resultsDirectory, exitCode, publishable: true, sarifExported: true });
+    // Verify native SARIF, then exercise the CLI's manual export without model calls.
+    assert.equal(cliResult.sarifPath, join(resultsDirectory, 'exports/results.sarif'));
+    run(['export', resultsDirectory, '--export-format', 'sarif', '--source-root', repository,
+      '--output', cliResult.sarifPath], 0);
+    const result = await analyzeResults({ stdout, resultsDirectory, exitCode, publishable: true });
     assert.equal(result.scanStatus, 'completed');
     assert.equal(result.policyStatus, threshold ? 'failed' : 'passed');
     assert.equal(result.reportStatus, 'ready');

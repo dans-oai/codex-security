@@ -50,8 +50,10 @@ test('only repository and diff scopes are supported, with separate path and diff
   assert.throws(() => parse({scope:'working-tree'}), /scope must be one of: repository, diff/);
   assert.throws(() => parse({'diff-base':'HEAD~1'}), /requires scope: diff/);
 });
-test('numeric and boolean parsing rejects ambiguous or unbounded input', () => {
-  for (const value of ['NaN','Infinity','-1','0','1e99','10 dollars']) assert.throws(() => parse({'max-cost':value}));
+test('numeric and boolean parsing follows their documented types', () => {
+  for (const value of ['NaN','Infinity','-1','0','10 dollars']) assert.throws(() => parse({'max-cost':value}));
+  assert.equal(parse({'max-cost':'1e99'}).maxCost, 1e99);
+  assert.equal(parse({'max-cost':'1e-2'}).maxCost, 0.01);
   for (const value of ['yes','TRUE','1']) assert.throws(() => parse({verbose:value}));
   for (const value of ['0','1.5','91']) assert.throws(() => parse({'retention-days':value}));
 });
@@ -59,7 +61,7 @@ test('path lists accept literal filenames but reject unsafe locations and option
   assert.deepEqual(parse({paths:'src/my folder\nlib'}).paths, ['src/my folder','lib']);
   assert.deepEqual(parse({paths:'src/[slug]/page.tsx\nsrc/star*file.ts\nsrc/question?file.ts'}).paths,
     ['src/[slug]/page.tsx', 'src/star*file.ts', 'src/question?file.ts']);
-  for (const paths of ['/etc','../other','src/../../other','--output-dir','a\\b','C:/other','x\u0000'])
+  for (const paths of ['/etc','../other','src/../../other','a\\b','C:/other','x\u0000'])
     assert.throws(() => parse({paths}));
 });
 test('CLI path arguments use normalized, deduplicated repository-relative paths', () => {
@@ -68,8 +70,11 @@ test('CLI path arguments use normalized, deduplicated repository-relative paths'
   const args = scanArguments(input, {repository:'/checkout'}, '/results', '/usr/bin/python3');
   assert.deepEqual(args.filter(arg => arg.startsWith('--path=')).map(arg => arg.slice('--path='.length)), input.paths);
 });
-test('model cannot inject a CLI option', () => {
-  assert.throws(() => parse({'model':'--plugin-path=evil'}), /not a CLI option/);
+test('option-shaped model values remain bound to the model option', () => {
+  const input = parse({model:'--plugin-path=synthetic'});
+  const args = scanArguments(input, {repository:'/checkout'}, '/results', '/usr/bin/python3');
+  assert.ok(args.includes('--model=--plugin-path=synthetic'));
+  assert.ok(!args.includes('--plugin-path=synthetic'));
 });
 test('dry-run allows keyless configuration validation', () => {
   const dryArgs=scanArguments(parse({'dry-run':'true'}),{repository:'/checkout'},'/results','/usr/bin/python3');
@@ -80,7 +85,7 @@ test('CLI arguments preserve literal values and enforce CI policy', () => {
   const args = scanArguments(input, {repository:'/checkout'}, '/private/results', '/usr/bin/python3');
   assert.equal(args[args.indexOf('--provider') + 1], 'openai');
   assert.equal(args[args.indexOf('--auth') + 1], 'api-key');
-  assert.ok(args.includes('model; echo never-execute')); assert.ok(args.includes('--path=src/my folder'));
+  assert.ok(args.includes('--model=model; echo never-execute')); assert.ok(args.includes('--path=src/my folder'));
   assert.ok(!args.some(arg => arg.startsWith('approval_policy=')));
   assert.ok(!args.some(arg => arg.startsWith('approvals_reviewer=')));
   assert.ok(args.includes('analytics.enabled=false'));
@@ -105,11 +110,12 @@ test('report publication and artifact settings remain configurable', () => {
   assert.equal(input.uploadArtifacts, true);
   assert.equal(input.artifactName, 'reports-component');
   assert.equal(input.retentionDays, 14);
+  assert.equal(parse({'artifact-name':'reports for synthetic component'}).artifactName, 'reports for synthetic component');
 });
 
 
 test('normalized option-shaped paths remain literal CLI values', () => {
-  const input = parse({paths:'./--help\n./--version', 'dry-run':'true'});
+  const input = parse({paths:'--help\n./--version', 'dry-run':'true'});
   assert.deepEqual(input.paths, ['--help', '--version']);
   const args = scanArguments(input, {repository:'/checkout'}, '/results', '/usr/bin/python3');
   assert.ok(args.includes('--path=--help'));

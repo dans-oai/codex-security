@@ -6,7 +6,6 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { analyzeResults, readReportFile, type ResultOptions } from '../src/results.js';
 import { collectReports } from '../src/artifacts.js';
-import { exportSarifArgs } from '../src/sarif.js';
 
 async function fixture(t: { after(fn: () => Promise<void>): void }): Promise<ResultOptions> {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'codex-results-test-')));
@@ -285,11 +284,6 @@ test('safe reader accepts regular reports larger than the removed Action-only li
   const bytes = Buffer.alloc(16 * 1024 * 1024 + 1, ' ');
   await writeFile(join(opts.resultsDirectory, 'findings.json'), bytes);
   assert.equal((await readReportFile(opts.resultsDirectory, 'findings.json')).length, bytes.length);
-});
-
-test('exporter args bind directory and checkout explicitly', () => {
-  assert.deepEqual(exportSarifArgs('/tmp/a b', '/repo', '/tmp/a b/exports/results.sarif'),
-    ['export', '/tmp/a b', '--export-format', 'sarif', '--source-root', '/repo', '--output', '/tmp/a b/exports/results.sarif']);
 });
 
 test('SARIF publication rejects external references and encoded traversal paths', async (t) => {

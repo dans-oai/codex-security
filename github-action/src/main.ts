@@ -1,12 +1,10 @@
 import * as core from '@actions/core';
-import { readFile, lstat, realpath } from 'node:fs/promises';
-import { join } from 'node:path';
+import { readFile, realpath } from 'node:fs/promises';
 import { parseInputs, scanArguments, type Inputs } from './inputs.js';
-import { resolveTarget, validateEvent, type EventContext, type Target } from './targets.js';
+import { resolveTarget, type EventContext, type Target } from './targets.js';
 import { SUPPORTED_CLI_VERSION, setupRuntime, cleanupRuntime, runtimeEnvironment, type Runtime } from './runtime.js';
 import { runProcess, safeLogLines } from './process.js';
 import { analyzeResults, type ScanResults } from './results.js';
-import { exportSarifArgs } from './sarif.js';
 import { collectReports, uploadReports } from './artifacts.js';
 import { resultSummary, emitAnnotations, plain, resultTitle } from './reporting.js';
 
@@ -24,8 +22,6 @@ interface Dependencies {
 async function context(): Promise<EventContext> {
   const path = process.env.GITHUB_EVENT_PATH;
   if (!path) throw new Error('GITHUB_EVENT_PATH is required; run this action in GitHub Actions.');
-  const info = await lstat(path);
-  if (!info.isFile() || info.isSymbolicLink() || info.size > 10 * 1024 * 1024) throw new Error('GitHub event payload is not a bounded regular file.');
   const payload: unknown = JSON.parse(await readFile(path, 'utf8'));
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Invalid GitHub event payload.');
   return {eventName: process.env.GITHUB_EVENT_NAME ?? '', repository: process.env.GITHUB_REPOSITORY ?? '',
@@ -71,7 +67,6 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
     const apiKey = process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY || '';
     inputs = parseInputs(name => core.getInput(name), process.env.GITHUB_WORKSPACE ?? '');
     const event = await context();
-    validateEvent(event);
     target = await resolveTarget(inputs, event);
     core.setOutput('scanned-sha', target.scannedSha);
     core.setOutput('analysis-ref', target.analysisRef);
@@ -110,8 +105,7 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
       try {
         execution = await deps.runProcess(runtime.nodePath, [runtime.cliPath, ...args], {
           cwd: target.repository, env: inputs.dryRun ? runtimeEnvironment(runtime) : runtime.env(apiKey),
-          timeoutMs: 6 * 60 * 60 * 1000, maxOutputBytes: 4 * 1024 * 1024, maxStdoutBytes: Infinity,
-          // Stream bounded stderr with terminal controls escaped; structured stdout stays private.
+          // Stream stderr with terminal controls escaped; structured stdout is consumed below.
           log: inputs.verbose ? core.info : undefined,
         });
       } finally { clearInterval(timer); }
@@ -119,7 +113,7 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
       core.setOutput('exit-code', String(execution.exitCode));
       const interrupted = execution.interrupted || execution.timedOut || !!execution.signal;
       if (inputs.dryRun) {
-        if (execution.exitCode !== 0 || interrupted) throw new Error(`CLI configuration validation failed. ${inputs.verbose ? 'See the CLI diagnostics above.' : 'Set verbose: true for bounded diagnostics.'}`);
+        if (execution.exitCode !== 0 || interrupted) throw new Error(`CLI configuration validation failed. ${inputs.verbose ? 'See the CLI diagnostics above.' : 'Set verbose: true for diagnostics.'}`);
         core.setOutput('scan-status', 'skipped');
         core.setOutput('skip-reason', 'dry-run');
         core.setOutput('report-status', 'ready');
@@ -128,31 +122,23 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
         finalSummary = 'Dry-run validated local CLI configuration without credentials. It did not verify authentication/model access, scan code, or evaluate findings. Use a separate configuration job, never the production required security check.';
         core.info(finalSummary);
       } else {
-        core.info('Checking the checkout and preparing CLI results for GitHub.');
+        core.info('Preparing CLI results for GitHub.');
         let checkoutError = '';
-        try { await resolveTarget(inputs, event); }
-        catch { checkoutError = 'The source checkout changed during scanning. Results cannot establish a completed scan of the requested revision.'; }
-        const resultOptions = {stdout: execution.stdout, resultsDirectory: runtime.resultsDirectory,
-          exitCode: execution.exitCode, executionFailed: interrupted || !!checkoutError,
-          publishable: target.publishable && !interrupted && !checkoutError};
-        let result = await analyzeResults(resultOptions);
-        if (result.paths.jsonPath && !result.paths.sarifPath && !interrupted && !checkoutError) {
-          core.info('Producing a SARIF export from the validated scan.');
-          try {
-            const exported = await deps.runProcess(runtime.nodePath, [runtime.cliPath, ...exportSarifArgs(runtime.resultsDirectory, target.repository, join(runtime.resultsDirectory, 'exports/results.sarif')), '--python', runtime.pythonPath], {
-              cwd: target.repository, env: runtimeEnvironment(runtime), timeoutMs: 60_000,
-              log: inputs.verbose ? core.info : undefined,
-            });
-            if (exported.exitCode === 0 && !exported.interrupted && !exported.timedOut && !exported.signal)
-              result = await analyzeResults({...resultOptions, sarifExported: true});
-          } catch { log('SARIF export could not run; retaining the scan result.'); }
+        // The pinned CLI does not snapshot working-tree state for committed diff scans.
+        if (inputs.scope === 'diff') {
+          try { await resolveTarget(inputs, event); }
+          catch { checkoutError = 'The source checkout changed during scanning. Results cannot establish a completed scan of the requested revision.'; }
         }
+        const result = await analyzeResults({stdout: execution.stdout, resultsDirectory: runtime.resultsDirectory,
+          exitCode: execution.exitCode, executionFailed: interrupted || !!checkoutError, publishable: target.publishable && !interrupted && !checkoutError});
         if (result.paths.jsonPath && !result.paths.sarifPath)
           core.warning('SARIF report is unavailable; scan results and other reports are still available.');
         if (checkoutError) result.errors.unshift(checkoutError);
         if (interrupted) result.errors.unshift('Scan was interrupted or exceeded its execution limit. Available findings are provisional.');
+        let reportsValidated = false;
         try {
           const reports = await collectReports(result);
+          reportsValidated = true;
           if (inputs.uploadArtifacts) {
             core.info('Uploading validated report artifacts.');
             await uploadReports(reports, inputs, tempRoot);
@@ -161,14 +147,14 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
           result.reportStatus = 'failed';
           result.sarifUploadReady = false;
           result.errors.push(plain(error instanceof Error ? error.message : 'Report publication failed.'));
-          // Withhold all report paths after containment/upload failure.
-          result.paths = {resultsDirectory: '', manifestPath: '', jsonPath: '', coveragePath: '', sarifPath: ''};
+          // Keep local reports available when only the remote upload failed.
+          if (!reportsValidated) result.paths = {resultsDirectory: '', manifestPath: '', jsonPath: '', coveragePath: '', sarifPath: ''};
         }
         outputs(result, target, execution.exitCode);
         core.info(`Scan: ${result.scanStatus}; findings policy: ${result.policyStatus}; report: ${result.reportStatus}; SARIF upload ready: ${result.sarifUploadReady}.`);
         core.info(`${result.scanStatus === 'completed' ? 'Findings' : 'Provisional findings'}: ${result.counts ? Object.entries(result.counts).map(([level, count]) => `${level}: ${count}`).join(', ') : 'unavailable'}.`);
         core.info(`Estimated cost: ${result.estimatedCost === undefined ? 'unavailable' : `$${result.estimatedCost.toFixed(4)}`}.`);
-        for (const error of result.errors.slice(0, 10)) log(`Report diagnostic: ${error}`);
+        for (const error of result.errors) log(`Report diagnostic: ${error}`);
         finalSummary = resultSummary(result, inputs, target);
         if (inputs.annotations) emitAnnotations(result);
         success = result.reportStatus !== 'failed' && (result.scanStatus === 'incomplete' ||
@@ -179,7 +165,7 @@ export async function runAction(actionRoot: string, overrides: Partial<Dependenc
       }
     }
   } catch (error) {
-    const message = plain(error instanceof Error ? error.message : 'Unexpected action failure.', 2000);
+    const message = plain(error instanceof Error ? error.message : 'Unexpected action failure.');
     finalSummary = `<pre>${message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/@/g, '&#64;')}</pre>`;
     core.setOutput('sarif-upload-ready', 'false');
     core.error(message);

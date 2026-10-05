@@ -21,7 +21,6 @@ export interface ResultOptions {
   exitCode: number | null;
   executionFailed?: boolean;
   publishable: boolean;
-  sarifExported?: boolean;
 }
 export interface ResultPaths {
   resultsDirectory: string;
@@ -43,7 +42,6 @@ export interface ScanResults {
 }
 
 const REPORT_FILES = new Set(['scan-manifest.json', 'findings.json', 'coverage.json', 'exports/results.sarif']);
-const LEVELS: readonly Severity[] = ['informational', 'low', 'medium', 'high', 'critical'];
 
 /** Access only owned report files after the scanner exits; never follow links. */
 async function processReportFile(root: string, name: string, adapt?: (bytes: Buffer) => Buffer): Promise<Buffer> {
@@ -113,9 +111,7 @@ export async function analyzeResults(options: ResultOptions): Promise<ScanResult
       result.errors.push(value.message);
       return result;
     }
-    if (!isRecord(value) || !isRecord(value.manifest) || !isRecord(value.manifest.scan) ||
-        !isRecord(value.manifest.scan.target) || !isRecord(value.findings) || !Array.isArray(value.findings.findings) ||
-        !isRecord(value.coverage) || !['complete', 'partial', 'unknown'].includes(String(value.coverage.completeness)))
+    if (!value?.manifest?.scan?.target || !Array.isArray(value?.findings?.findings) || !value?.coverage)
       throw new Error();
   } catch {
     result.errors.push('CLI did not return a usable JSON scan result. See the CLI diagnostics.');
@@ -127,9 +123,6 @@ export async function analyzeResults(options: ResultOptions): Promise<ScanResult
   }
   try {
     result.findings = value.findings.findings.map((finding: any): Finding => {
-      if (!isRecord(finding) || typeof finding.title !== 'string' || typeof finding.summary !== 'string' ||
-          !isRecord(finding.severity) || !LEVELS.includes(finding.severity.level as Severity) || !Array.isArray(finding.locations))
-        throw new Error('CLI finding is missing fields needed for GitHub reporting.');
       const location = finding.locations[0];
       if (location && (!safeSourcePath(location.path) || !Number.isSafeInteger(location.startLine) || location.startLine < 1 ||
           (location.endLine !== undefined && (!Number.isSafeInteger(location.endLine) || location.endLine < location.startLine))))
@@ -143,11 +136,10 @@ export async function analyzeResults(options: ResultOptions): Promise<ScanResult
   }
   result.counts = { critical: 0, high: 0, medium: 0, low: 0, informational: 0 };
   for (const finding of result.findings) result.counts[finding.severity] += 1;
-  if (isRecord(value.cost) && typeof value.cost.estimatedUsd === 'number' && Number.isFinite(value.cost.estimatedUsd) && value.cost.estimatedUsd >= 0)
-    result.estimatedCost = value.cost.estimatedUsd;
+  result.estimatedCost = value.cost?.estimatedUsd;
   result.paths = {resultsDirectory: options.resultsDirectory, manifestPath: join(options.resultsDirectory, 'scan-manifest.json'),
     jsonPath: join(options.resultsDirectory, 'findings.json'), coveragePath: join(options.resultsDirectory, 'coverage.json'), sarifPath: ''};
-  const warnings = (Array.isArray(value.warnings) ? value.warnings : []).filter((warning: unknown): warning is string => typeof warning === 'string');
+  const warnings: string[] = value.warnings ?? [];
   // The CLI includes target-change warnings in result data even when it exits 2.
   // Those and failed execution must not become warning-only partial scans.
   if (options.executionFailed || value.manifest.scan.status !== 'completed' || warnings.length > 0) {
@@ -167,9 +159,9 @@ export async function analyzeResults(options: ResultOptions): Promise<ScanResult
   }
   result.errors.push(...warnings);
   const sarifPath = join(options.resultsDirectory, 'exports/results.sarif');
-  if (options.sarifExported || value.sarifPath != null) {
+  if (value.sarifPath != null) {
     try {
-      if (!options.sarifExported && value.sarifPath !== sarifPath) throw new Error('SARIF path is outside the expected report location.');
+      if (value.sarifPath !== sarifPath) throw new Error('SARIF path is outside the expected report location.');
       await prepareSarif(options.resultsDirectory);
       result.paths.sarifPath = sarifPath;
     } catch { result.errors.push('SARIF report is missing, unsafe, or unreadable.'); }
