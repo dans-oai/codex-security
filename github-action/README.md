@@ -51,6 +51,12 @@ Findings are report-only by default. Valid partial results produce a warning;
 scanner and required reporting errors fail the job. Set `fail-on-severity` to
 fail on findings at or above a selected severity when the scan is complete.
 
+To explicitly select an approved Cyber access program, add
+`cyber-access-program: daybreak_blue` to the scan step's `with` settings.
+The input also accepts `standard` and `daybreak_red`; choose a program supported
+by your model and API project. Leaving it unset preserves CLI defaults.
+Selecting a program does not grant access or guarantee that every request succeeds.
+
 ## Scan pull requests
 
 Use the same API-key secret and Action commit as above. Check out the PR head
@@ -277,25 +283,26 @@ validation. Verify report compatibility when adopting a new release.
 
 Inputs are strings. Quote booleans and use newline-separated literal paths for lists.
 
-| Input              | Default                   | Meaning                                                                                                                                  |
-| ------------------ | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `repository`       | `${{ github.workspace }}` | Checkout root. Use paths to select folders within the checkout.                                                                          |
-| `scope`            | `repository`              | repository or diff. Select diff for PR changes only; repository scans the full checkout.                                                 |
-| `paths`            | Unset                     | Newline-delimited literal repository-relative files or folders. Only for repository scope; no glob expansion.                            |
-| `diff-base`        | Unset                     | Diff base revision. Defaults to the PR merge base; required outside PRs when scope is diff.                                              |
-| `mode`             | `standard`                | standard or deep. Deep supports repository scans, including selected paths; not diff scans.                                              |
-| `model`            | `gpt-5.6-sol`             | Model with access through your API key. Cost limits require CLI pricing support for the model.                                           |
-| `effort`           | `xhigh`                   | Reasoning effort: minimal, low, medium, high, xhigh, or max (subject to model support).                                                  |
-| `max-cost`         | Unset                     | Positive estimated USD stop threshold per invocation. In-flight requests can exceed it; unset means no cost limit.                       |
-| `max-time-hours`   | Unset                     | Positive Deep discovery duration in hours, up to 96. Unset uses the CLI default. Finalization and job timeout are separate.              |
-| `fail-on-severity` | `none`                    | none, low, medium, high, or critical. Applies to complete scans. Valid partial results warn; scanner and required reporting errors fail. |
-| `verbose`          | `true`                    | Stream CLI diagnostics to the job log. Set false for lifecycle and elapsed-time messages only.                                           |
-| `dry-run`          | `false`                   | Validate local configuration without a scan or API key. Does not verify authentication or model access. Use a separate non-required job. |
-| `summary`          | `true`                    | Write a human-readable job summary.                                                                                                      |
-| `annotations`      | `true`                    | Emit up to 50 source finding annotations; complete findings remain in reports.                                                           |
-| `upload-artifacts` | `false`                   | Upload an allowlist of validated reports. Reports may contain source and vulnerability details.                                          |
-| `artifact-name`    | `codex-security`          | Report artifact name; choose distinct names for matrix jobs and multiple invocations.                                                    |
-| `retention-days`   | `7`                       | Artifact retention, 1–90 days (subject to repository limits).                                                                            |
+| Input                  | Default                   | Meaning                                                                                                                                                |
+| ---------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `repository`           | `${{ github.workspace }}` | Checkout root. Use paths to select folders within the checkout.                                                                                        |
+| `scope`                | `repository`              | repository or diff. Select diff for PR changes only; repository scans the full checkout.                                                               |
+| `paths`                | Unset                     | Newline-delimited literal repository-relative files or folders. Only for repository scope; no glob expansion.                                          |
+| `diff-base`            | Unset                     | Diff base revision. Defaults to the PR merge base; required outside PRs when scope is diff.                                                            |
+| `mode`                 | `standard`                | standard or deep. Deep supports repository scans, including selected paths; not diff scans.                                                            |
+| `model`                | `gpt-5.6-sol`             | Model with access through your API key. Cost limits require CLI pricing support for the model.                                                         |
+| `cyber-access-program` | Unset                     | Optional Cyber access program: standard, daybreak_blue, or daybreak_red. Unset preserves CLI defaults. Requires approved API project and model access. |
+| `effort`               | `xhigh`                   | Reasoning effort: minimal, low, medium, high, xhigh, or max (subject to model support).                                                                |
+| `max-cost`             | Unset                     | Positive estimated USD stop threshold per invocation. In-flight requests can exceed it; unset means no cost limit.                                     |
+| `max-time-hours`       | Unset                     | Positive Deep discovery duration in hours, up to 96. Unset uses the CLI default. Finalization and job timeout are separate.                            |
+| `fail-on-severity`     | `none`                    | none, low, medium, high, or critical. Applies to complete scans. Valid partial results warn; scanner and required reporting errors fail.               |
+| `verbose`              | `true`                    | Stream CLI diagnostics to the job log. Set false for lifecycle and elapsed-time messages only.                                                         |
+| `dry-run`              | `false`                   | Validate local configuration without a scan or API key. Does not verify authentication or model access. Use a separate non-required job.               |
+| `summary`              | `true`                    | Write a human-readable job summary.                                                                                                                    |
+| `annotations`          | `true`                    | Emit up to 50 source finding annotations; complete findings remain in reports.                                                                         |
+| `upload-artifacts`     | `false`                   | Upload an allowlist of validated reports. Reports may contain source and vulnerability details.                                                        |
+| `artifact-name`        | `codex-security`          | Report artifact name; choose distinct names for matrix jobs and multiple invocations.                                                                  |
+| `retention-days`       | `7`                       | Artifact retention, 1–90 days (subject to repository limits).                                                                                          |
 
 ## Outputs
 
