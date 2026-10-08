@@ -15,6 +15,10 @@ save this workflow in `.github/workflows/codex-security.yml`.
 Replace `REPLACE_WITH_REVIEWED_COMMIT` with the full SHA of an Action commit.
 When using a fork, replace `openai` with the fork owner.
 
+This example requests Daybreak Blue. Use an API key from a project with Blue
+enabled; without Daybreak access, omit `cyber-access-program` or set it to
+`standard`. See [Daybreak access and refusals](#daybreak-access-and-refusals).
+
 ```yaml
 name: Codex Security repository
 on:
@@ -29,6 +33,7 @@ jobs:
   security:
     runs-on: ubuntu-24.04
     steps:
+      # Configure Bubblewrap and AppArmor so Codex Security can run safely in its sandbox.
       - name: Set up the Ubuntu sandbox
         run: |
           sudo apt-get update
@@ -41,6 +46,7 @@ jobs:
         with:
           model: gpt-5.6-sol
           effort: high
+          cyber-access-program: daybreak_blue
         env:
           OPENAI_API_KEY: ${{ secrets.CODEX_SECURITY_API_KEY }}
 ```
@@ -50,6 +56,24 @@ The workflow runs weekly on Mondays at 07:23 UTC. To run it manually, use
 Findings are report-only by default. Valid partial results produce a warning;
 scanner and required reporting errors fail the job. Set `fail-on-severity` to
 fail on findings at or above a selected severity when the scan is complete.
+
+### Ubuntu sandbox setup
+
+Codex Security runs commands inside a sandbox to limit their filesystem and
+network access. On the Ubuntu 24.04 runner used above, that sandbox uses
+Bubblewrap (`bwrap`), and Ubuntu's AppArmor policy must allow it to create the
+required isolated environment.
+
+The setup step installs `bubblewrap` and `apparmor-profiles`, then uses
+`apparmor_parser -r` to load the supplied `bwrap-userns-restrict` profile. The
+profile permits Bubblewrap's sandbox setup while retaining Ubuntu's broader
+AppArmor restrictions. Keep this step before the Action: the CLI checks that
+its sandbox works before scanning and fails if it cannot start, for example
+with `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`.
+
+This setup is specific to the Linux runner. Local macOS scans use the built-in
+Seatbelt sandbox and do not need Bubblewrap. See the
+[sandbox documentation](https://learn.chatgpt.com/docs/sandboxing) for details.
 
 ## Daybreak access and refusals
 
@@ -100,6 +124,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
+      # Configure Bubblewrap and AppArmor so Codex Security can run safely in its sandbox.
       - name: Set up the Ubuntu sandbox
         run: |
           sudo apt-get update
